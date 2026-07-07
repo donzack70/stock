@@ -40,18 +40,19 @@ textarea.mono{min-height:100px;resize:vertical}
 .gate .gsub{text-align:center;font-size:12px;color:#999;margin-bottom:18px}
 /* TABS */
 .tabbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
-.tab-btn{padding:9px 20px;border:1px solid #ddd;border-radius:10px;background:#ececea;color:#888;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}
+.tab-btn{padding:9px 18px;border:1px solid #ddd;border-radius:10px;background:#ececea;color:#888;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}
 .tab-btn:hover{background:#f3f3f1}
 .tab-btn.act{background:#e8f4f4;color:#0e7c7b;border-color:#9ecfce;box-shadow:0 1px 4px rgba(14,124,123,.12)}
 /* CHIPS */
 .chips{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
-.chip{flex:1;min-width:150px;background:#fff;border:1px solid #e8e8e6;border-radius:12px;padding:12px 16px}
+.chip{flex:1;min-width:140px;background:#fff;border:1px solid #e8e8e6;border-radius:12px;padding:12px 16px}
 .chip .lbl{font-size:11px;color:#888;margin-bottom:3px}
 .chip .val{font-size:19px;font-weight:700}
 .chip.teal .val{color:#0e7c7b}
 .chip.green .val{color:#1e7a45}
 .chip.warn .val{color:#b7600a}
 .chip.red .val{color:#c0392b}
+.chip.blue .val{color:#2565c7}
 /* TABLE */
 .tbl-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
@@ -80,6 +81,12 @@ tr:hover td{background:#fafafe}
 .filter-row select{padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;background:#fafafa}
 .flt-btn{padding:6px 13px;border:1px solid #ddd;border-radius:20px;background:#fafafa;color:#777;font-size:12px;font-weight:600;cursor:pointer}
 .flt-btn.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+/* SEGMENTED (pilih jenis import) */
+.seg{display:inline-flex;border:1.5px solid #ddd;border-radius:10px;overflow:hidden}
+.seg button{padding:10px 22px;border:none;background:#fff;color:#999;font-size:13.5px;font-weight:700;cursor:pointer;transition:all .12s}
+.seg button:not(:last-child){border-right:1.5px solid #eee}
+.seg button.on-masuk{background:#1e7a45;color:#fff}
+.seg button.on-keluar{background:#b7600a;color:#fff}
 /* IMPORT PREVIEW */
 .prev-tbl input{padding:5px 7px;border:1px solid #ddd;border-radius:6px;font-size:12px;background:#fafafa;width:100%}
 .prev-tbl input:focus{outline:none;border-color:#0e7c7b;background:#fff}
@@ -90,11 +97,23 @@ tr:hover td{background:#fafafe}
 .tag-keluar{background:#fdf6ec;color:#b7600a}
 .tag-dup{background:#fdf5f5;color:#c0392b;border:1px solid #f0c5c5}
 .tag-fuzzy{background:#f3edfa;color:#7d3c98}
-/* FISIK */
+/* FISIK / EDIT INPUTS */
 .fis-inp{width:64px;padding:5px 6px;border:1px solid #ddd;border-radius:6px;font-size:12.5px;text-align:right;background:#fafafa}
 .fis-inp:focus{outline:none;border-color:#0e7c7b;background:#fff}
 .fis-inp.changed{border-color:#b7600a;background:#fffbf0}
 .fis-kg{font-size:11px;color:#888;white-space:nowrap}
+.edit-inp{width:100%;padding:5px 7px;border:1px solid #ddd;border-radius:6px;font-size:12px;background:#fafafa;font-family:inherit}
+.edit-inp:focus{outline:none;border-color:#0e7c7b;background:#fff}
+.edit-inp.changed{border-color:#b7600a;background:#fffbf0}
+.edit-inp.r{text-align:right}
+/* MOVERS / KATEGORI */
+.mv-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:700px){.mv-grid{grid-template-columns:1fr}}
+.bar-cell{position:relative}
+.bar-fill{position:absolute;left:0;top:0;bottom:0;border-radius:4px;opacity:.14;z-index:0}
+.bar-fill.masuk{background:#1e7a45}
+.bar-fill.keluar{background:#b7600a}
+.bar-txt{position:relative;z-index:1}
 /* MODAL */
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:500;display:none;align-items:flex-start;justify-content:center;padding:30px 14px;overflow-y:auto}
 .modal.show{display:flex}
@@ -108,6 +127,8 @@ tr:hover td{background:#fafafe}
 .hist-row:last-child{border-bottom:none}
 .hist-wrap{border:1px solid #eee;border-radius:9px;max-height:320px;overflow-y:auto}
 @media(max-width:700px){.e-grid{grid-template-columns:1fr}}
+/* sticky save bar */
+.savebar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;padding:8px 12px;background:#f7fbfb;border:1px solid #d6eceb;border-radius:9px;position:sticky;top:52px;z-index:20}
 </style>
 </head>
 <body>
@@ -147,6 +168,7 @@ tr:hover td{background:#fafafe}
   <button class="tab-btn act" id="tb_dash" onclick="setTab('dash')">📊 Dashboard</button>
   <button class="tab-btn" id="tb_stok" onclick="setTab('stok')">📦 Stok</button>
   <button class="tab-btn" id="tb_imp" onclick="setTab('imp')">📋 Import Mutasi</button>
+  <button class="tab-btn" id="tb_mutasi" onclick="setTab('mutasi')">🧾 Semua Mutasi</button>
   <button class="tab-btn" id="tb_fisik" onclick="setTab('fisik')">✏️ Hitung Fisik</button>
 </div>
 
@@ -154,6 +176,29 @@ tr:hover td{background:#fafafe}
 
 <!-- ====== DASHBOARD ====== -->
 <div id="tab_dash" style="display:none">
+  <div class="mv-grid">
+    <div class="card" style="margin-bottom:0">
+      <div class="card-title" style="color:#1e7a45">📥 Paling Banyak MASUK (periode ini)</div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Barang</th><th class="r">Total masuk</th></tr></thead>
+        <tbody id="dashTopMasuk"></tbody>
+      </table></div>
+    </div>
+    <div class="card" style="margin-bottom:0">
+      <div class="card-title" style="color:#b7600a">📤 Paling Banyak KELUAR (periode ini)</div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Barang</th><th class="r">Total keluar</th></tr></thead>
+        <tbody id="dashTopKeluar"></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:12px">
+    <div class="card-title" style="color:#2565c7">🗂 Ringkasan Per Kategori</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Kategori</th><th class="r">Jenis barang</th><th class="r">Total stok teoritis</th><th class="r">Nilai (Rp)</th></tr></thead>
+      <tbody id="dashKat"></tbody>
+    </table></div>
+  </div>
   <div class="card">
     <div class="card-title" style="color:#c0392b">⚠ Selisih Terbesar (fisik vs teoritis)</div>
     <div class="tbl-wrap"><table>
@@ -182,18 +227,20 @@ tr:hover td{background:#fafafe}
   <div class="card">
     <div class="card-title">📦 Daftar Stok
       <span class="spacer"></span>
+      <button class="btn btn-line btn-sm" onclick="toggleStokEdit()" id="stokEditBtn">✏️ Edit massal</button>
       <button class="btn btn-line btn-sm" onclick="toggleMasterImp()" id="mImpToggle">📥 Import master (paste)</button>
       <button class="btn btn-t btn-sm" onclick="openEdit(null)">➕ Tambah barang</button>
       <button class="btn btn-line btn-sm" onclick="copyStok()">📋 Copy ke Google Sheet</button>
     </div>
     <div id="mImpBody" style="display:none;border:1px dashed #ddd;border-radius:9px;padding:10px 12px;margin-bottom:10px;background:#fafaf8">
-      <div class="hint" style="margin:0 0 6px">Paste dari Excel/Google Sheet, kolom (dengan baris judul): <b>Nama, Kategori, Sat, Isi per Drum, Stok Awal</b>. Kolom Kategori / Isi per Drum / Stok Awal boleh kosong. Barang yang namanya sudah ada akan dilewati.</div>
-      <div class="field"><textarea id="mImpTsv" class="mono" placeholder="Nama	Kategori	Sat	Isi/Drum	Stok Awal&#10;NAPHTOL ASBS	Naphtol	kg	25	183"></textarea></div>
-      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
-        <button class="btn btn-t btn-sm" onclick="importMaster()" id="mImpBtn">💾 Import master</button>
-        <span class="hint" style="margin:0" id="mImpInfo"></span>
+      <div class="hint" style="margin:0 0 6px">Paste dari Excel/Google Sheet <b>termasuk baris judul</b>. Judul kolom yang dikenali: <b>Nama</b> (wajib), <b>Kategori</b>, <b>Sat</b>, <b>Isi/Drum</b>, <b>Harga</b> (opsional), dan stok awal boleh berjudul <b>Stok Awal / Stok / Total / Jumlah / Sisa</b>. Urutan kolom bebas — yang penting judulnya.</div>
+      <div class="field"><textarea id="mImpTsv" class="mono" placeholder="Nama	Kategori	Sat	Isi/Drum	Harga	Stok Awal&#10;NAPHTOL ASBS	Naphtol	kg	25	85000	183&#10;GARAM BIRU B 27% LUTA	Garam	kg	30	42000	2327"></textarea></div>
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-line btn-sm" onclick="parseMaster()">🔍 Periksa data dulu</button>
+        <span class="hint" style="margin:0">Setelah diperiksa, akan muncul preview kolom yang terbaca sebelum disimpan.</span>
       </div>
       <div class="err-msg" id="mImpErr"></div>
+      <div id="mImpPrev" style="margin-top:8px"></div>
       <div class="ok-msg" id="mImpOk"></div>
     </div>
     <div class="filter-row">
@@ -201,21 +248,48 @@ tr:hover td{background:#fafafe}
       <select id="fltKat" onchange="renderStok()"><option value="">Semua kategori</option></select>
       <button class="flt-btn" id="fltMinus" onclick="toggleFltMinus()">🔻 Hanya minus</button>
     </div>
-    <div class="tbl-wrap"><table>
-      <thead><tr>
-        <th>Barang</th>
-        <th class="r" title="Isi per drum">Isi/Drum</th>
-        <th class="r">Awal</th>
-        <th class="r">Masuk</th>
-        <th class="r">Keluar</th>
-        <th class="r">Teoritis</th>
-        <th class="r">Fisik</th>
-        <th class="r">Selisih</th>
-        <th style="width:70px">Status</th>
-        <th style="width:118px"></th>
-      </tr></thead>
-      <tbody id="stokBody"></tbody>
-    </table></div>
+
+    <!-- NORMAL VIEW -->
+    <div id="stokNormal">
+      <div class="tbl-wrap"><table>
+        <thead><tr>
+          <th>Barang</th>
+          <th class="r" title="Isi per drum">Isi/Drum</th>
+          <th class="r">Awal</th>
+          <th class="r">Masuk</th>
+          <th class="r">Keluar</th>
+          <th class="r">Teoritis</th>
+          <th class="r">Fisik</th>
+          <th class="r">Selisih</th>
+          <th style="width:70px">Status</th>
+          <th style="width:118px"></th>
+        </tr></thead>
+        <tbody id="stokBody"></tbody>
+      </table></div>
+    </div>
+
+    <!-- EDIT MASSAL VIEW -->
+    <div id="stokEdit" style="display:none">
+      <div class="savebar">
+        <button class="btn btn-g btn-sm" onclick="stokSaveAll()" id="stokSaveAllBtn" disabled>💾 Simpan semua perubahan</button>
+        <span class="hint" id="stokEditCount" style="margin:0">Belum ada perubahan.</span>
+        <span class="spacer"></span>
+        <button class="btn btn-line btn-sm" onclick="toggleStokEdit()">✕ Selesai edit</button>
+      </div>
+      <div class="tbl-wrap"><table>
+        <thead><tr>
+          <th>Nama</th>
+          <th style="width:150px">Kategori</th>
+          <th style="width:60px">Sat</th>
+          <th class="r" style="width:90px">Isi/Drum</th>
+          <th class="r" style="width:100px">Stok Awal</th>
+          <th class="r" style="width:110px">Harga/sat</th>
+          <th style="width:30px"></th>
+        </tr></thead>
+        <tbody id="stokEditBody"></tbody>
+      </table></div>
+    </div>
+
     <div class="ok-msg" id="stokOk">✔ Berhasil dicopy! Langsung paste (Ctrl+V) di Google Sheet.</div>
   </div>
 </div>
@@ -223,15 +297,54 @@ tr:hover td{background:#fafafe}
 <!-- ====== IMPORT MUTASI ====== -->
 <div id="tab_imp" style="display:none">
   <div class="card">
-    <div class="card-title">📋 Import dari App Nota</div>
-    <div class="hint" style="margin:0 0 8px">Paste hasil <b>"Copy ke Google Sheet"</b> dari app nota (termasuk baris judul). Aplikasi mendeteksi otomatis: data <b>Penjualan → barang keluar</b>, data <b>Barang Masuk → barang masuk</b>. Nama barang dicocokkan otomatis ke daftar stok — bisa diperiksa &amp; diubah dulu sebelum disimpan.</div>
-    <div class="field"><textarea id="impTsv" class="mono" placeholder="Paste di sini..."></textarea></div>
+    <div class="card-title">① Pilih jenis mutasi</div>
+    <div class="seg" id="jenisSeg">
+      <button id="segMasuk" onclick="setImportJenis('masuk')">📥 Barang MASUK</button>
+      <button id="segKeluar" onclick="setImportJenis('keluar')">📤 Barang KELUAR</button>
+    </div>
+    <div class="hint" style="margin-top:6px">Pilih dulu apakah data yang mau di-paste ini <b>barang masuk</b> (dari supplier / barang datang) atau <b>barang keluar</b> (penjualan / barang keluar gudang). Ini menentukan stok bertambah atau berkurang.</div>
+  </div>
+  <div class="card">
+    <div class="card-title">② Paste data dari app nota</div>
+    <div class="hint" style="margin:0 0 8px">Paste hasil <b>"Copy ke Google Sheet"</b> dari app nota (termasuk baris judul). Nama barang dicocokkan otomatis ke daftar stok — bisa diperiksa &amp; diubah dulu sebelum disimpan. Baris ongkir / non-stok bisa dihilangkan centangnya.</div>
+    <div class="field"><textarea id="impTsv" class="mono" placeholder="Tanggal	Pelanggan	No.Nota	Nama Barang	Qty	Sat&#10;..."></textarea></div>
     <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-line" onclick="parseImport()">🔍 Baca data</button>
-      <span class="hint" style="margin:0">Baris ongkir / barang non-stok bisa dihilangkan centangnya di preview.</span>
+      <span class="hint" style="margin:0" id="impJenisNote"></span>
     </div>
     <div class="err-msg" id="impErr"></div>
     <div id="impPreview" style="margin-top:10px"></div>
+  </div>
+</div>
+
+<!-- ====== SEMUA MUTASI (BULK EDIT) ====== -->
+<div id="tab_mutasi" style="display:none">
+  <div class="card">
+    <div class="card-title">🧾 Semua Mutasi — edit &amp; hapus dalam satu tabel
+      <span class="spacer"></span>
+      <span class="hint" style="margin:0">Perbaiki qty / tanggal / jenis / barang yang salah tanpa buka satu-satu.</span>
+    </div>
+    <div class="filter-row">
+      <input type="text" id="mutCari" placeholder="Cari barang / pihak / no nota..." oninput="renderMutasi()">
+      <select id="mutJenis" onchange="renderMutasi()">
+        <option value="">Semua jenis</option>
+        <option value="masuk">Hanya masuk</option>
+        <option value="keluar">Hanya keluar</option>
+      </select>
+    </div>
+    <div class="hint" style="margin:0 0 8px">Ubah nilainya lalu klik 💾 di baris itu. Kalau <b>Barang</b> diganti ke barang lain, mutasi otomatis dipindah ke barang tersebut. Klik ✕ untuk hapus.</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        <th style="width:70px">Jenis</th>
+        <th style="width:130px">Tanggal</th>
+        <th style="min-width:180px">Barang</th>
+        <th class="r" style="width:80px">Qty</th>
+        <th style="min-width:120px">Pihak</th>
+        <th style="width:110px">No. Nota</th>
+        <th style="width:96px"></th>
+      </tr></thead>
+      <tbody id="mutBody"></tbody>
+    </table></div>
   </div>
 </div>
 
@@ -270,13 +383,14 @@ tr:hover td{background:#fafafe}
 <div class="modal" id="editModal">
   <div class="modal-box" onclick="event.stopPropagation()">
     <h3 id="emTitle">Tambah Barang</h3>
-    <div class="sub">Isi per drum bisa diubah kapan saja tanpa mengubah data mutasi.</div>
+    <div class="sub">Isi per drum &amp; harga bisa diubah kapan saja tanpa mengubah data mutasi.</div>
     <div class="field" style="margin-bottom:8px"><label>Nama barang</label><input type="text" id="eNama" placeholder="Contoh: GARAM BIRU B 27% LUTA"></div>
     <div class="e-grid">
       <div class="field"><label>Kategori</label><input type="text" id="eKat" list="katList" placeholder="Contoh: Garam"></div>
       <div class="field"><label>Satuan</label><input type="text" id="eSat" placeholder="kg"></div>
       <div class="field"><label>Isi per drum (dalam satuan) — 0 jika tanpa drum</label><input type="text" inputmode="decimal" id="eIsiDrum" placeholder="cth: 25"></div>
       <div class="field"><label>Stok awal periode</label><input type="text" inputmode="decimal" id="eAwal" placeholder="cth: 110"></div>
+      <div class="field"><label>Harga per satuan (Rp) — opsional</label><input type="text" inputmode="decimal" id="eHarga" placeholder="cth: 42000"></div>
     </div>
     <div class="hint" id="eDrumHint"></div>
     <div class="err-msg" id="eErr"></div>
@@ -296,7 +410,7 @@ tr:hover td{background:#fafafe}
     <h3 id="hmTitle">Riwayat</h3>
     <div class="sub" id="hmSub"></div>
     <div class="hist-wrap" id="hmList"></div>
-    <div class="hint">Salah import? Klik ✕ untuk menghapus satu mutasi — stok teoritis langsung terkoreksi.</div>
+    <div class="hint">Untuk edit qty/tanggal/jenis, pakai tab 🧾 Semua Mutasi. Di sini klik ✕ untuk menghapus satu mutasi.</div>
     <div class="modal-close-row"><button class="btn btn-line" onclick="closeHist()">Tutup</button></div>
   </div>
 </div>
@@ -323,9 +437,9 @@ const COLL = 'stok_items'; // koleksi khusus app ini — terpisah dari 'transaks
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const pad2 = n => String(n).padStart(2,'0');
-// Angka Indonesia: 1.234,5
 const num = v => { const n = Math.round((parseFloat(v)||0)*100)/100; return n.toLocaleString('id-ID',{maximumFractionDigits:2}); };
-// Terima "4,5" dan "4.5" dan "1.234,5"
+const rpNum = v => Math.round(parseFloat(v)||0).toLocaleString('id-ID');
+const rp = v => 'Rp ' + rpNum(v);
 const parseId = v => { let s = String(v ?? '').trim(); if(!s) return 0;
   if(s.includes(',')) s = s.replace(/\./g,'').replace(',','.');
   return parseFloat(s.replace(/[^0-9.\-]/g,'')) || 0; };
@@ -333,7 +447,6 @@ const isoToDisp = iso => { if(!iso) return ''; const p = String(iso).split('-');
 const dispToIso = d => { const p = String(d||'').trim().split('/'); return p.length===3 ? p[2]+'-'+pad2(parseInt(p[1])||1)+'-'+pad2(parseInt(p[0])||1) : ''; };
 function showMsg(id, txt, ms=3500){ const el=$(id); el.textContent=txt; el.style.display='block'; if(ms) setTimeout(()=>el.style.display='none', ms); }
 
-// Breakdown drum: 110 kg @ isiDrum 25 -> "4 drum + 10"
 function drumStr(kg, isiDrum){
   if(!isiDrum || isiDrum <= 0 || kg === 0) return '';
   const neg = kg < 0; const a = Math.abs(kg);
@@ -348,17 +461,23 @@ function drumStr(kg, isiDrum){
 
 // ===================== STATE =====================
 let auth=null, db=null, unsub=null;
-let items = [];         // semua barang dari Firestore
+let items = [];
 let curTab = 'dash';
 let fltMinusOn = false, fisBelumOn = false;
 let editDocId = null, histDocId = null;
-let importRows = [];    // hasil parse import
-let fisikDraft = {};    // {docId: {drum, eceran}} perubahan belum disimpan
+let importRows = [];
+let importJenis = 'keluar';         // pilihan manual masuk/keluar
+let fisikDraft = {};
+let stokEditMode = false;
+let stokDraft = {};                 // {docId: {nama,kat,sat,isiDrum,stokAwal,harga}}
+let mutDraft = {};                  // {itemId#idx: {jenis,tanggal,qty,pihak,noNota,barang}}
 
 const sumMut = (it, jenis) => (it.mutasi||[]).filter(m=>m.jenis===jenis).reduce((s,m)=>s+(parseFloat(m.qty)||0),0);
 const teoritisOf = it => (parseFloat(it.stokAwal)||0) + sumMut(it,'masuk') - sumMut(it,'keluar');
 const fisikKgOf = it => it.fisik ? (parseFloat(it.fisik.drum)||0)*(parseFloat(it.isiDrum)||0) + (parseFloat(it.fisik.eceran)||0) : null;
 const selisihOf = it => { const f = fisikKgOf(it); return f===null ? null : Math.round((f - teoritisOf(it))*100)/100; };
+const hargaOf = it => parseFloat(it.harga)||0;
+const nilaiOf = it => teoritisOf(it) * hargaOf(it);
 
 // ===================== FIREBASE INIT =====================
 const fbApp = initializeApp(firebaseConfig);
@@ -372,6 +491,7 @@ onAuthStateChanged(auth, user => {
     $('gate').style.display='none'; $('app').style.display='block';
     $('userBox').style.display='inline'; $('userBox').textContent = user.email;
     $('logoutBtn').style.display='inline-block';
+    updateJenisSeg();
     startListening();
   } else {
     $('gate').style.display='block'; $('app').style.display='none';
@@ -414,16 +534,13 @@ function similarity(a,b){ const ta=trigrams(a), tb=trigrams(b); let c=0; ta.forE
 function fuzzyFind(nama){
   if(!nama || nama.trim().length < 2) return null;
   const n = nama.trim().toLowerCase();
-  // 1: contained
   const t1 = items.find(it => { const m = it.nama.toLowerCase(); return m.includes(n) || n.includes(m); });
   if(t1) return t1;
-  // 2: semua kata ada
   const words = n.split(/\s+/).filter(w=>w.length>=3);
   if(words.length){
     const t2 = items.find(it => words.every(w => it.nama.toLowerCase().includes(w)));
     if(t2) return t2;
   }
-  // 3: trigram
   let best=null, bs=0;
   items.forEach(it => { const s = similarity(n, it.nama.toLowerCase()); if(s>bs){bs=s;best=it;} });
   return bs >= 0.30 ? best : null;
@@ -432,7 +549,7 @@ function fuzzyFind(nama){
 // ===================== TABS & RENDER =====================
 window.setTab = function(t){
   curTab = t;
-  ['dash','stok','imp','fisik'].forEach(x => {
+  ['dash','stok','imp','mutasi','fisik'].forEach(x => {
     $('tb_'+x).className = 'tab-btn' + (x===t?' act':'');
     $('tab_'+x).style.display = x===t ? 'block':'none';
   });
@@ -444,6 +561,7 @@ function renderAll(){
   renderKatOptions();
   if(curTab==='dash') renderDash();
   if(curTab==='stok') renderStok();
+  if(curTab==='mutasi') renderMutasi();
   if(curTab==='fisik') renderFisik();
   $('itemList').innerHTML = items.map(it=>`<option value="${esc(it.nama)}">`).join('');
 }
@@ -462,15 +580,54 @@ function renderChips(){
   const dihitung = items.filter(it=>it.fisik).length;
   const selisih = items.filter(it=>{ const s = selisihOf(it); return s!==null && Math.abs(s) > 0.01; }).length;
   const minus = items.filter(it=>teoritisOf(it) < -0.01).length;
-  $('chips').innerHTML = `
+  const nilaiTotal = items.reduce((s,it)=>s+nilaiOf(it),0);
+  const adaHarga = items.some(it=>hargaOf(it)>0);
+  let html = `
     <div class="chip teal"><div class="lbl">Total barang</div><div class="val">${total}</div></div>
     <div class="chip green"><div class="lbl">Sudah dihitung fisik</div><div class="val">${dihitung} / ${total}</div></div>
     <div class="chip ${selisih>0?'red':'green'}"><div class="lbl">Ada selisih</div><div class="val">${selisih}</div></div>
     <div class="chip ${minus>0?'warn':'green'}"><div class="lbl">Stok teoritis minus</div><div class="val">${minus}</div></div>`;
+  if(adaHarga) html += `<div class="chip blue"><div class="lbl">Nilai stok teoritis</div><div class="val" style="font-size:16px">${rp(nilaiTotal)}</div></div>`;
+  $('chips').innerHTML = html;
 }
 
 function renderDash(){
-  // selisih terbesar
+  // ---- Top movers ----
+  const masuk = items.map(it=>({it, q:sumMut(it,'masuk')})).filter(x=>x.q>0).sort((a,b)=>b.q-a.q).slice(0,8);
+  const keluar = items.map(it=>({it, q:sumMut(it,'keluar')})).filter(x=>x.q>0).sort((a,b)=>b.q-a.q).slice(0,8);
+  const maxMasuk = masuk.length ? masuk[0].q : 1;
+  const maxKeluar = keluar.length ? keluar[0].q : 1;
+  $('dashTopMasuk').innerHTML = masuk.length
+    ? masuk.map(({it,q})=>`<tr>
+        <td class="nama-cell">${esc(it.nama)}<span class="kat">${esc(it.kat||'')}</span></td>
+        <td class="r bar-cell"><div class="bar-fill masuk" style="width:${(q/maxMasuk*100).toFixed(0)}%"></div><span class="bar-txt" style="color:#1e7a45;font-weight:700">${num(q)} ${esc(it.sat||'kg')}</span></td></tr>`).join('')
+    : `<tr><td colspan="2" class="empty">Belum ada barang masuk.</td></tr>`;
+  $('dashTopKeluar').innerHTML = keluar.length
+    ? keluar.map(({it,q})=>`<tr>
+        <td class="nama-cell">${esc(it.nama)}<span class="kat">${esc(it.kat||'')}</span></td>
+        <td class="r bar-cell"><div class="bar-fill keluar" style="width:${(q/maxKeluar*100).toFixed(0)}%"></div><span class="bar-txt" style="color:#b7600a;font-weight:700">${num(q)} ${esc(it.sat||'kg')}</span></td></tr>`).join('')
+    : `<tr><td colspan="2" class="empty">Belum ada barang keluar.</td></tr>`;
+
+  // ---- Ringkasan kategori ----
+  const cats = {};
+  items.forEach(it=>{
+    const k = it.kat || '(tanpa kategori)';
+    if(!cats[k]) cats[k] = { n:0, kg:0, nilai:0 };
+    cats[k].n++; cats[k].kg += teoritisOf(it); cats[k].nilai += nilaiOf(it);
+  });
+  const catArr = Object.entries(cats).sort((a,b)=> b[1].nilai - a[1].nilai || b[1].kg - a[1].kg);
+  const adaHarga = items.some(it=>hargaOf(it)>0);
+  const totRow = catArr.reduce((t,[,v])=>({n:t.n+v.n,kg:t.kg+v.kg,nilai:t.nilai+v.nilai}),{n:0,kg:0,nilai:0});
+  $('dashKat').innerHTML = catArr.length
+    ? catArr.map(([k,v])=>`<tr>
+        <td class="nama-cell">${esc(k)}</td>
+        <td class="r">${v.n}</td>
+        <td class="r ${v.kg<-0.01?'neg':''}" style="font-weight:600">${num(v.kg)}</td>
+        <td class="r">${adaHarga ? (v.nilai>0?rp(v.nilai):'<span class="zero">-</span>') : '<span class="zero">—</span>'}</td></tr>`).join('')
+      + `<tr style="background:#fafafa"><td style="font-weight:700">TOTAL</td><td class="r" style="font-weight:700">${totRow.n}</td><td class="r" style="font-weight:700">${num(totRow.kg)}</td><td class="r" style="font-weight:700">${adaHarga?rp(totRow.nilai):'—'}</td></tr>`
+    : `<tr><td colspan="4" class="empty">Belum ada barang.</td></tr>`;
+
+  // ---- Selisih ----
   const sel = items.map(it=>({it, s:selisihOf(it)})).filter(x=>x.s!==null && Math.abs(x.s)>0.01)
     .sort((a,b)=>Math.abs(b.s)-Math.abs(a.s)).slice(0,10);
   $('dashSelisih').innerHTML = sel.length
@@ -481,7 +638,7 @@ function renderDash(){
         <td class="r ${s<0?'neg':'pos'}">${s>0?'+':''}${num(s)}</td></tr>`).join('')
     : `<tr><td colspan="4" class="empty">Tidak ada selisih — atau belum ada hitungan fisik.</td></tr>`;
 
-  // minus
+  // ---- Minus ----
   const minus = items.filter(it=>teoritisOf(it) <= 0.01 && (it.stokAwal>0 || (it.mutasi||[]).length))
     .sort((a,b)=>teoritisOf(a)-teoritisOf(b)).slice(0,12);
   $('dashMinus').innerHTML = minus.length
@@ -493,7 +650,7 @@ function renderDash(){
         <td class="r ${teoritisOf(it)<-0.01?'neg':'zero'}">${num(teoritisOf(it))}</td></tr>`).join('')
     : `<tr><td colspan="5" class="empty">Tidak ada stok minus 🎉</td></tr>`;
 
-  // mutasi terakhir
+  // ---- Mutasi terakhir ----
   const muts = [];
   items.forEach(it => (it.mutasi||[]).forEach(m => muts.push({...m, nama: it.nama})));
   muts.sort((a,b)=>String(b.tanggal).localeCompare(String(a.tanggal)));
@@ -521,6 +678,7 @@ function filteredItems(cariId, katId, minusOnly){
 }
 
 window.renderStok = function(){
+  if(stokEditMode){ renderStokEdit(); return; }
   const list = filteredItems('fltCari','fltKat', fltMinusOn);
   const tbody = $('stokBody');
   if(!list.length){ tbody.innerHTML = `<tr><td colspan="10" class="empty">${items.length?'Tidak ada yang cocok dengan filter.':'Belum ada barang. Klik "➕ Tambah barang" atau "📥 Import master".'}</td></tr>`; return; }
@@ -531,7 +689,7 @@ window.renderStok = function(){
       : Math.abs(s)<=0.01 ? '<span class="st st-cocok">COCOK</span>'
       : '<span class="st st-selisih">SELISIH</span>';
     return `<tr>
-      <td class="nama-cell">${esc(it.nama)}<span class="kat">${esc(it.kat||'')} · ${esc(it.sat||'kg')}</span></td>
+      <td class="nama-cell">${esc(it.nama)}<span class="kat">${esc(it.kat||'')} · ${esc(it.sat||'kg')}${hargaOf(it)>0?' · '+rp(hargaOf(it)):''}</span></td>
       <td class="r">${isi>0?num(isi):'<span class="zero">-</span>'}</td>
       <td class="r">${num(it.stokAwal)}</td>
       <td class="r" style="color:#1e7a45">${sumMut(it,'masuk')>0?num(sumMut(it,'masuk')):'-'}</td>
@@ -548,52 +706,212 @@ window.renderStok = function(){
   }).join('');
 };
 
+// ===================== EDIT MASSAL MASTER =====================
+window.toggleStokEdit = function(){
+  stokEditMode = !stokEditMode;
+  stokDraft = {};
+  $('stokEditBtn').className = 'btn btn-sm ' + (stokEditMode ? 'btn-g' : 'btn-line');
+  $('stokEditBtn').textContent = stokEditMode ? '✅ Sedang edit massal' : '✏️ Edit massal';
+  $('stokNormal').style.display = stokEditMode ? 'none' : 'block';
+  $('stokEdit').style.display = stokEditMode ? 'block' : 'none';
+  if(stokEditMode) renderStokEdit(); else renderStok();
+};
+
+function stokDraftGet(it){
+  if(!stokDraft[it.id]) stokDraft[it.id] = {
+    nama: it.nama||'', kat: it.kat||'', sat: it.sat||'kg',
+    isiDrum: it.isiDrum ? String(it.isiDrum) : '', stokAwal: it.stokAwal!=null ? String(it.stokAwal) : '',
+    harga: it.harga ? String(it.harga) : ''
+  };
+  return stokDraft[it.id];
+}
+function stokRowChanged(it){
+  const d = stokDraft[it.id]; if(!d) return false;
+  return d.nama.trim() !== (it.nama||'')
+    || d.kat.trim() !== (it.kat||'')
+    || (d.sat.trim()||'kg') !== (it.sat||'kg')
+    || parseId(d.isiDrum) !== (parseFloat(it.isiDrum)||0)
+    || parseId(d.stokAwal) !== (parseFloat(it.stokAwal)||0)
+    || parseId(d.harga) !== (parseFloat(it.harga)||0);
+}
+
+function renderStokEdit(){
+  const list = filteredItems('fltCari','fltKat', fltMinusOn);
+  const tbody = $('stokEditBody');
+  if(!list.length){ tbody.innerHTML = `<tr><td colspan="7" class="empty">${items.length?'Tidak ada yang cocok dengan filter.':'Belum ada barang.'}</td></tr>`; updateStokEditBar(); return; }
+  tbody.innerHTML = list.map(it => {
+    const d = stokDraftGet(it);
+    return `<tr id="serow_${it.id}">
+      <td><input class="edit-inp" value="${esc(d.nama)}" oninput="stokEditChange('${it.id}','nama',this.value)"></td>
+      <td><input class="edit-inp" list="katList" value="${esc(d.kat)}" oninput="stokEditChange('${it.id}','kat',this.value)"></td>
+      <td><input class="edit-inp" value="${esc(d.sat)}" oninput="stokEditChange('${it.id}','sat',this.value)"></td>
+      <td><input class="edit-inp r" inputmode="decimal" value="${esc(d.isiDrum)}" oninput="stokEditChange('${it.id}','isiDrum',this.value)"></td>
+      <td><input class="edit-inp r" inputmode="decimal" value="${esc(d.stokAwal)}" oninput="stokEditChange('${it.id}','stokAwal',this.value)"></td>
+      <td><input class="edit-inp r" inputmode="decimal" value="${esc(d.harga)}" oninput="stokEditChange('${it.id}','harga',this.value)"></td>
+      <td class="r"><span id="sedot_${it.id}" style="color:#b7600a;font-weight:700;visibility:hidden">●</span></td>
+    </tr>`;
+  }).join('');
+  updateStokEditBar();
+}
+
+window.stokEditChange = function(id, field, val){
+  const it = items.find(x=>x.id===id); if(!it) return;
+  stokDraftGet(it)[field] = val;
+  const dot = $('sedot_'+id);
+  if(dot) dot.style.visibility = stokRowChanged(it) ? 'visible' : 'hidden';
+  // highlight changed inputs in this row
+  const row = $('serow_'+id);
+  if(row){ const changed = stokRowChanged(it); row.querySelectorAll('.edit-inp').forEach(inp=>inp.classList.toggle('changed', changed)); }
+  updateStokEditBar();
+};
+
+function updateStokEditBar(){
+  const n = items.filter(it => stokRowChanged(it)).length;
+  const btn = $('stokSaveAllBtn'), cnt = $('stokEditCount');
+  btn.disabled = n === 0;
+  btn.textContent = n>0 ? `💾 Simpan ${n} perubahan` : '💾 Simpan semua perubahan';
+  cnt.textContent = n>0 ? `${n} baris diubah — belum disimpan.` : 'Belum ada perubahan.';
+}
+
+window.stokSaveAll = async function(){
+  const changed = items.filter(it => stokRowChanged(it));
+  if(!changed.length) return;
+  // validasi nama kosong / duplikat
+  const namesLower = new Set(items.map(it=>it.nama.toLowerCase()));
+  for(const it of changed){
+    const d = stokDraft[it.id];
+    const nm = d.nama.trim();
+    if(!nm){ alert(`Nama barang tidak boleh kosong (lihat baris "${it.nama}").`); return; }
+  }
+  const btn = $('stokSaveAllBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
+  try {
+    let batch = writeBatch(db), inBatch = 0;
+    for(const it of changed){
+      const d = stokDraft[it.id];
+      batch.update(doc(db, COLL, it.id), {
+        nama: d.nama.trim(), kat: d.kat.trim(), sat: d.sat.trim()||'kg',
+        isiDrum: parseId(d.isiDrum), stokAwal: parseId(d.stokAwal), harga: parseId(d.harga)
+      });
+      inBatch++;
+      if(inBatch >= 400){ await batch.commit(); batch = writeBatch(db); inBatch = 0; }
+    }
+    if(inBatch>0) await batch.commit();
+    stokDraft = {};
+    // onSnapshot akan re-render; pastikan bar reset
+    setTimeout(()=>{ if(stokEditMode) renderStokEdit(); }, 300);
+  } catch(e){
+    alert('Gagal menyimpan: '+e.message);
+    btn.disabled = false; btn.textContent = '💾 Coba lagi';
+  }
+};
+
 // ===================== IMPORT MASTER =====================
 window.toggleMasterImp = function(){
   const b = $('mImpBody'); const open = b.style.display !== 'none';
   b.style.display = open ? 'none':'block';
 };
 
-window.importMaster = async function(){
+let masterParsed = [];
+
+window.parseMaster = function(){
   $('mImpErr').style.display='none';
+  $('mImpPrev').innerHTML=''; masterParsed=[];
   const raw = $('mImpTsv').value.trim();
   if(!raw){ showMsg('mImpErr','Paste data dulu.'); return; }
   const lines = raw.split('\n').map(l=>l.split('\t'));
   const header = lines[0].map(h=>h.trim().toLowerCase());
-  const idx = names => header.findIndex(h => names.some(n=>h.includes(n)));
-  let iNama = idx(['nama']);
-  const hasHeader = iNama >= 0;
-  const iKat = idx(['kategori','kat']), iSat = idx(['sat']), iIsi = idx(['isi','drum']), iAwal = idx(['stok','awal']);
-  const start = hasHeader ? 1 : 0;
-  if(!hasHeader) iNama = 0;
-  const existing = new Set(items.map(it=>it.nama.toLowerCase()));
+
+  const findCol = (kandidat, hindari=[]) => header.findIndex(h =>
+    kandidat.some(k => h.includes(k)) && !hindari.some(k => h.includes(k)));
+  const iNama = findCol(['nama barang','nama produk','nama','barang','produk','item'], ['no']);
+  if(iNama < 0){ showMsg('mImpErr','Kolom "Nama" tidak ditemukan di baris judul. Pastikan baris pertama adalah judul kolom dan ada kolom bernama Nama / Nama Barang.', 9000); return; }
+  const iKat  = findCol(['kategori','kat']);
+  const iSat  = findCol(['satuan','sat']);
+  const iIsi  = findCol(['isi/drum','isi drum','isi per drum','per drum','isidrum','drum'], ['sisa','stok']);
+  const iHarga= findCol(['harga','price','hrg']);
+  const iAwal = findCol(['stok awal','stock awal','stok','stock','awal','total','jumlah','sisa','qty'], ['drum','isi','harga']);
+
+  const existing = new Map(items.map(it=>[it.nama.toLowerCase(), it]));
+  let nBaru=0, nAda=0;
+  for(let i=1;i<lines.length;i++){
+    const r = lines[i];
+    const nama = String(r[iNama]||'').trim();
+    if(!nama) continue;
+    const sudahAda = existing.has(nama.toLowerCase());
+    if(sudahAda) nAda++; else nBaru++;
+    masterParsed.push({
+      nama, sudahAda,
+      kat:  iKat>=0  ? String(r[iKat]||'').trim() : '',
+      sat: (iSat>=0  ? String(r[iSat]||'').trim() : '') || 'kg',
+      isiDrum: iIsi>=0  ? parseId(r[iIsi])  : 0,
+      harga: iHarga>=0 ? parseId(r[iHarga]) : 0,
+      stokAwal: iAwal>=0 ? parseId(r[iAwal]) : 0
+    });
+  }
+  if(!masterParsed.length){ showMsg('mImpErr','Tidak ada baris data di bawah baris judul.', 6000); return; }
+
+  const colTag = (label, i) => `<span class="tag" style="${i>=0?'background:#e8f4f4;color:#0e7c7b':'background:#f0f0ee;color:#999'}">${label}: ${i>=0?'✓ kolom '+(i+1)+' ("'+esc(lines[0][i].trim())+'")':'– kosong'}</span>`;
+  const contoh = masterParsed.slice(0,5).map(p=>`<tr>
+      <td class="nama-cell">${esc(p.nama)}${p.sudahAda?' <span class="tag tag-dup">sudah ada</span>':''}</td>
+      <td>${esc(p.kat)||'<span class="zero">-</span>'}</td>
+      <td>${esc(p.sat)}</td>
+      <td class="r">${p.isiDrum>0?num(p.isiDrum):'<span class="zero">0</span>'}</td>
+      <td class="r">${p.harga>0?rp(p.harga):'<span class="zero">-</span>'}</td>
+      <td class="r" style="font-weight:700${p.stokAwal?'':';color:#c0392b'}">${num(p.stokAwal)}</td>
+    </tr>`).join('');
+  const semuaNol = masterParsed.every(p=>p.stokAwal===0);
+  $('mImpPrev').innerHTML = `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+      ${colTag('Nama',iNama)} ${colTag('Kategori',iKat)} ${colTag('Sat',iSat)} ${colTag('Isi/Drum',iIsi)} ${colTag('Harga',iHarga)} ${colTag('Stok Awal',iAwal)}
+    </div>
+    ${iAwal<0||semuaNol?`<div class="err-msg" style="display:block;margin:0 0 8px">⚠ ${iAwal<0?'Kolom stok awal tidak terdeteksi':'Semua stok awal terbaca 0'} — cek judul kolom stok di Excel Anda (harus mengandung: Stok / Total / Jumlah / Sisa / Awal).</div>`:''}
+    <div class="hint" style="margin:0 0 4px">Contoh ${Math.min(5,masterParsed.length)} baris pertama dari ${masterParsed.length} baris terbaca:</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Nama</th><th>Kategori</th><th>Sat</th><th class="r">Isi/Drum</th><th class="r">Harga</th><th class="r">Stok Awal</th></tr></thead>
+      <tbody>${contoh}</tbody>
+    </table></div>
+    <div style="display:flex;gap:10px;margin-top:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-t btn-sm" onclick="importMasterGo()" id="mImpBtn">💾 Import ${masterParsed.length} barang</button>
+      ${nAda?`<label style="font-size:12px;color:#666;display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="mImpUpdate" checked style="width:15px;height:15px">
+        perbarui ${nAda} barang yang sudah ada (timpa kategori, sat, isi/drum, harga &amp; stok awal — riwayat mutasi tetap aman)
+      </label>`:''}
+    </div>
+    <div class="hint" style="margin-top:4px">${nBaru} barang baru${nAda?`, ${nAda} sudah ada di daftar stok`:''}.</div>`;
+};
+
+window.importMasterGo = async function(){
+  if(!masterParsed.length) return;
+  const updateMode = $('mImpUpdate') ? $('mImpUpdate').checked : false;
+  const existing = new Map(items.map(it=>[it.nama.toLowerCase(), it]));
   const btn = $('mImpBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Import...';
-  let n=0, skip=0;
+  let nBaru=0, nUpdate=0, nSkip=0;
   try {
     let batch = writeBatch(db), inBatch = 0;
-    for(let i=start;i<lines.length;i++){
-      const r = lines[i];
-      const nama = String(r[iNama]||'').trim();
-      if(!nama) continue;
-      if(existing.has(nama.toLowerCase())){ skip++; continue; }
-      existing.add(nama.toLowerCase());
-      const ref = doc(collection(db, COLL));
-      batch.set(ref, {
-        nama,
-        kat: hasHeader && iKat>=0 ? String(r[iKat]||'').trim() : '',
-        sat: (hasHeader && iSat>=0 ? String(r[iSat]||'').trim() : '') || 'kg',
-        isiDrum: hasHeader && iIsi>=0 ? parseId(r[iIsi]) : 0,
-        stokAwal: hasHeader && iAwal>=0 ? parseId(r[iAwal]) : 0,
-        mutasi: [], fisik: null, createdAt: serverTimestamp()
-      });
-      n++; inBatch++;
+    const sudahDiproses = new Set();
+    for(const p of masterParsed){
+      const key = p.nama.toLowerCase();
+      if(sudahDiproses.has(key)) continue;
+      sudahDiproses.add(key);
+      const ada = existing.get(key);
+      if(ada){
+        if(!updateMode){ nSkip++; continue; }
+        batch.update(doc(db, COLL, ada.id), { nama:p.nama, kat:p.kat, sat:p.sat, isiDrum:p.isiDrum, harga:p.harga, stokAwal:p.stokAwal });
+        nUpdate++;
+      } else {
+        batch.set(doc(collection(db, COLL)), { nama:p.nama, kat:p.kat, sat:p.sat, isiDrum:p.isiDrum, harga:p.harga, stokAwal:p.stokAwal, mutasi:[], fisik:null, createdAt: serverTimestamp() });
+        nBaru++;
+      }
+      inBatch++;
       if(inBatch >= 400){ await batch.commit(); batch = writeBatch(db); inBatch = 0; }
     }
     if(inBatch > 0) await batch.commit();
-    showMsg('mImpOk', `✔ ${n} barang diimport${skip?`, ${skip} dilewati (sudah ada)`:''}.`, 6000);
-    $('mImpTsv').value='';
-  } catch(e){ showMsg('mImpErr','Gagal: '+e.message, 7000); }
-  btn.disabled = false; btn.textContent = '💾 Import master';
+    showMsg('mImpOk', `✔ Selesai: ${nBaru} barang baru, ${nUpdate} diperbarui${nSkip?`, ${nSkip} dilewati`:''}.`, 7000);
+    $('mImpTsv').value=''; $('mImpPrev').innerHTML=''; masterParsed=[];
+  } catch(e){
+    showMsg('mImpErr','Gagal: '+e.message, 8000);
+    btn.disabled = false; btn.textContent = '💾 Coba lagi';
+  }
 };
 
 // ===================== MODAL EDIT BARANG =====================
@@ -604,13 +922,13 @@ window.openEdit = function(id){
     const it = items.find(x=>x.id===id); if(!it) return;
     $('emTitle').textContent = '✏️ Ubah Barang';
     $('eNama').value = it.nama; $('eKat').value = it.kat||''; $('eSat').value = it.sat||'kg';
-    $('eIsiDrum').value = it.isiDrum||''; $('eAwal').value = it.stokAwal||'';
+    $('eIsiDrum').value = it.isiDrum||''; $('eAwal').value = it.stokAwal||''; $('eHarga').value = it.harga||'';
     $('eDelBtn').style.display = 'inline-block';
     const isi = parseFloat(it.isiDrum)||0;
     $('eDrumHint').textContent = isi>0 ? `Contoh: teoritis saat ini ${num(teoritisOf(it))} ${it.sat||'kg'} = ${drumStr(teoritisOf(it),isi)}` : '';
   } else {
     $('emTitle').textContent = '➕ Tambah Barang';
-    $('eNama').value=''; $('eKat').value=''; $('eSat').value='kg'; $('eIsiDrum').value=''; $('eAwal').value='';
+    $('eNama').value=''; $('eKat').value=''; $('eSat').value='kg'; $('eIsiDrum').value=''; $('eAwal').value=''; $('eHarga').value='';
     $('eDelBtn').style.display='none'; $('eDrumHint').textContent='';
   }
   $('editModal').classList.add('show');
@@ -626,7 +944,7 @@ window.saveEdit = async function(){
   if(dupe){ showMsg('eErr','Nama barang ini sudah ada.'); return; }
   const payload = {
     nama, kat: $('eKat').value.trim(), sat: $('eSat').value.trim()||'kg',
-    isiDrum: parseId($('eIsiDrum').value), stokAwal: parseId($('eAwal').value)
+    isiDrum: parseId($('eIsiDrum').value), stokAwal: parseId($('eAwal').value), harga: parseId($('eHarga').value)
   };
   const btn = $('eSaveBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
   try {
@@ -677,7 +995,19 @@ window.delMutasi = async function(i){
   catch(e){ alert('Gagal: '+e.message); }
 };
 
-// ===================== IMPORT MUTASI =====================
+// ===================== IMPORT MUTASI (jenis manual) =====================
+window.setImportJenis = function(j){ importJenis = j; updateJenisSeg(); };
+function updateJenisSeg(){
+  const m = $('segMasuk'), k = $('segKeluar');
+  if(!m||!k) return;
+  m.className = importJenis==='masuk' ? 'on-masuk' : '';
+  k.className = importJenis==='keluar' ? 'on-keluar' : '';
+  const note = $('impJenisNote');
+  if(note) note.innerHTML = importJenis==='masuk'
+    ? 'Mode: <b style="color:#1e7a45">BARANG MASUK</b> — stok akan <b>bertambah</b>.'
+    : 'Mode: <b style="color:#b7600a">BARANG KELUAR</b> — stok akan <b>berkurang</b>.';
+}
+
 window.parseImport = function(){
   $('impErr').style.display='none';
   $('impPreview').innerHTML=''; importRows=[];
@@ -686,29 +1016,29 @@ window.parseImport = function(){
   if(!raw){ showMsg('impErr','Paste data TSV dulu.'); return; }
   const lines = raw.split('\n').map(l=>l.split('\t'));
   const header = lines[0].map(h=>h.trim().toLowerCase());
-  const idx = name => header.findIndex(h=>h===name.toLowerCase());
+  const idxAny = (...names) => header.findIndex(h => names.some(n => h === n || h.includes(n)));
 
-  const isPenjualan = idx('pelanggan') >= 0;
-  const isBM = idx('supplier') >= 0;
-  if(!isPenjualan && !isBM){ showMsg('impErr','Baris judul tidak dikenali. Pastikan paste termasuk baris judul (Tanggal, Pelanggan/Supplier, Nama Barang, ...).', 8000); return; }
-  const jenis = isPenjualan ? 'keluar' : 'masuk';
+  const jenis = importJenis;   // <<< dari pilihan manual, bukan auto
+  const iNama = idxAny('nama barang','nama','barang','produk');
+  const iQty  = idxAny('qty','jumlah','qnt','quantity');
+  if(iNama < 0 || iQty < 0){ showMsg('impErr','Kolom "Nama Barang" / "Qty" tidak ditemukan di baris judul.', 7000); return; }
+  const iTgl   = idxAny('tanggal','tgl','date');
+  const iPihak = jenis==='masuk' ? idxAny('supplier','pemasok','pihak','vendor')
+                                 : idxAny('pelanggan','customer','pihak','buyer');
+  const iNota  = idxAny('no.nota','no nota','nonota','nota','invoice','faktur');
+  const iSat   = idxAny('sat','satuan','unit');
 
-  const iTgl = idx('tanggal'), iPihak = isPenjualan ? idx('pelanggan') : idx('supplier');
-  const iNota = idx('no.nota'), iNama = idx('nama barang'), iQty = idx('qty'), iSat = idx('sat');
-  if(iNama < 0 || iQty < 0){ showMsg('impErr','Kolom "Nama Barang" / "Qty" tidak ditemukan.', 6000); return; }
-
-  // ref yang sudah pernah diimport (deteksi duplikat)
   const existingRefs = new Set();
   items.forEach(it => (it.mutasi||[]).forEach(m => { if(m.ref) existingRefs.add(m.ref); }));
 
   for(let i=1;i<lines.length;i++){
-    const r = lines[i]; if(r.length < 3) continue;
+    const r = lines[i]; if(r.length < 2) continue;
     const namaRaw = String(r[iNama]||'').trim();
     const qty = parseId(r[iQty]);
     if(!namaRaw || qty <= 0) continue;
-    const tanggal = dispToIso(r[iTgl]) || new Date().toISOString().slice(0,10);
-    const pihak = String(r[iPihak]||'').trim();
-    const noNota = String(r[iNota]||'').trim();
+    const tanggal = (iTgl>=0 ? dispToIso(r[iTgl]) : '') || new Date().toISOString().slice(0,10);
+    const pihak = iPihak>=0 ? String(r[iPihak]||'').trim() : '';
+    const noNota = iNota>=0 ? String(r[iNota]||'').trim() : '';
     const sat = iSat>=0 ? String(r[iSat]||'kg').trim() : 'kg';
     const ref = [jenis, tanggal, noNota, namaRaw, qty].join('|').toLowerCase();
 
@@ -729,7 +1059,7 @@ window.parseImport = function(){
   const nNoMatch = importRows.filter(r=>!r.target).length;
   $('impPreview').innerHTML = `
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-      <span class="tag ${jenis==='masuk'?'tag-masuk':'tag-keluar'}" style="font-size:12px;padding:3px 12px">Terdeteksi: BARANG ${jenis.toUpperCase()} — ${importRows.length} baris</span>
+      <span class="tag ${jenis==='masuk'?'tag-masuk':'tag-keluar'}" style="font-size:12px;padding:3px 12px">Disimpan sebagai: BARANG ${jenis.toUpperCase()} — ${importRows.length} baris</span>
       ${nDup?`<span class="tag tag-dup">${nDup} kemungkinan duplikat (tidak dicentang)</span>`:''}
       ${nNoMatch?`<span class="tag tag-fuzzy">${nNoMatch} tidak ketemu — pilih manual atau hilangkan centang</span>`:''}
     </div>
@@ -746,7 +1076,7 @@ window.parseImport = function(){
       <tbody id="impBody2">${importRows.map((r,i)=>impRowHtml(r,i)).join('')}</tbody>
     </table></div>
     <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
-      <button class="btn btn-t" onclick="doImport()" id="impGoBtn">💾 Simpan mutasi terpilih</button>
+      <button class="btn ${jenis==='masuk'?'btn-g':'btn-t'}" onclick="doImport()" id="impGoBtn">💾 Simpan mutasi terpilih (${jenis.toUpperCase()})</button>
       <span class="hint" style="margin:0">Baris tanpa "Barang stok" tidak akan disimpan.</span>
     </div>
     <div class="ok-msg" id="impOk"></div>`;
@@ -782,7 +1112,6 @@ window.doImport = async function(){
   if(!rows.length){ showMsg('impErr','Tidak ada baris valid yang dicentang.', 5000); return; }
   const btn = $('impGoBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
   try {
-    // Kelompokkan per barang → satu update per barang
     const byItem = {};
     rows.forEach(r => {
       const it = findExact(r.target);
@@ -793,13 +1122,119 @@ window.doImport = async function(){
       const { it, add } = byItem[id];
       await updateDoc(doc(db, COLL, id), { mutasi: [...(it.mutasi||[]), ...add] });
     }
-    showMsg('impOk', `✔ ${rows.length} mutasi disimpan ke ${Object.keys(byItem).length} barang.`, 6000);
+    showMsg('impOk', `✔ ${rows.length} mutasi (${importJenis}) disimpan ke ${Object.keys(byItem).length} barang.`, 6000);
     $('impTsv').value='';
     setTimeout(()=>{ $('impPreview').innerHTML=''; importRows=[]; }, 2500);
   } catch(e){
     showMsg('impErr','Gagal menyimpan: '+e.message, 7000);
     btn.disabled = false; btn.textContent = '💾 Coba lagi';
   }
+};
+
+// ===================== SEMUA MUTASI (BULK EDIT) =====================
+function allMutasi(){
+  const arr = [];
+  items.forEach(it => (it.mutasi||[]).forEach((m, idx) => {
+    arr.push({ itemId: it.id, itemNama: it.nama, idx, ...m });
+  }));
+  arr.sort((a,b)=>String(b.tanggal).localeCompare(String(a.tanggal)));
+  return arr;
+}
+
+window.renderMutasi = function(){
+  const cari = $('mutCari').value.trim().toLowerCase();
+  const fj = $('mutJenis').value;
+  let list = allMutasi();
+  if(fj) list = list.filter(m => m.jenis === fj);
+  if(cari) list = list.filter(m =>
+    m.itemNama.toLowerCase().includes(cari) ||
+    String(m.pihak||'').toLowerCase().includes(cari) ||
+    String(m.noNota||'').toLowerCase().includes(cari));
+  const tbody = $('mutBody');
+  if(!list.length){ tbody.innerHTML = `<tr><td colspan="7" class="empty">${items.some(it=>(it.mutasi||[]).length)?'Tidak ada mutasi yang cocok dengan filter.':'Belum ada mutasi. Import dulu di tab 📋 Import Mutasi.'}</td></tr>`; return; }
+  tbody.innerHTML = list.map(m => {
+    const key = m.itemId+'#'+m.idx;
+    const d = mutDraft[key];
+    const jenis = d ? d.jenis : m.jenis;
+    const tanggal = d ? d.tanggal : m.tanggal;
+    const barang = d ? d.barang : m.itemNama;
+    const qty = d ? d.qty : m.qty;
+    const pihak = d ? d.pihak : (m.pihak||'');
+    const noNota = d ? d.noNota : (m.noNota||'');
+    const changed = !!d;
+    return `<tr id="mutrow_${key.replace('#','_')}">
+      <td><select class="edit-inp" onchange="mutChange('${key}','jenis',this.value)">
+        <option value="masuk"${jenis==='masuk'?' selected':''}>Masuk</option>
+        <option value="keluar"${jenis==='keluar'?' selected':''}>Keluar</option>
+      </select></td>
+      <td><input class="edit-inp" type="date" value="${esc(tanggal)}" onchange="mutChange('${key}','tanggal',this.value)"></td>
+      <td><input class="edit-inp" list="itemList" value="${esc(barang)}" onchange="mutChange('${key}','barang',this.value)"></td>
+      <td><input class="edit-inp r" inputmode="decimal" value="${String(qty).replace('.',',')}" oninput="mutChange('${key}','qty',this.value)"></td>
+      <td><input class="edit-inp" value="${esc(pihak)}" oninput="mutChange('${key}','pihak',this.value)"></td>
+      <td><input class="edit-inp" value="${esc(noNota)}" oninput="mutChange('${key}','noNota',this.value)"></td>
+      <td style="white-space:nowrap">
+        <button class="icon-btn" id="mutsave_${key.replace('#','_')}" onclick="mutSave('${m.itemId}',${m.idx})" ${changed?'':'disabled style="opacity:.35"'}>💾</button>
+        <button class="icon-btn danger" onclick="mutDel('${m.itemId}',${m.idx})">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+};
+
+window.mutChange = function(key, field, val){
+  const [itemId, idxS] = key.split('#'); const idx = parseInt(idxS);
+  const it = items.find(x=>x.id===itemId); if(!it) return;
+  const m = (it.mutasi||[])[idx]; if(!m) return;
+  if(!mutDraft[key]) mutDraft[key] = {
+    jenis: m.jenis, tanggal: m.tanggal, barang: it.nama,
+    qty: m.qty, pihak: m.pihak||'', noNota: m.noNota||''
+  };
+  mutDraft[key][field] = val;
+  const row = $('mutrow_'+key.replace('#','_'));
+  if(row) row.querySelectorAll('.edit-inp').forEach(inp=>inp.classList.add('changed'));
+  const btn = $('mutsave_'+key.replace('#','_'));
+  if(btn){ btn.disabled=false; btn.removeAttribute('style'); }
+};
+
+window.mutSave = async function(itemId, idx){
+  const key = itemId+'#'+idx;
+  const d = mutDraft[key]; if(!d) return;
+  const it = items.find(x=>x.id===itemId); if(!it) return;
+  const arr = [...(it.mutasi||[])];
+  const orig = arr[idx]; if(!orig) return;
+  const qty = parseId(d.qty);
+  if(qty <= 0){ alert('Qty harus lebih dari 0.'); return; }
+  const newM = { ...orig, jenis:d.jenis, tanggal:d.tanggal, qty, pihak:d.pihak.trim(), noNota:d.noNota.trim() };
+
+  const targetNama = d.barang.trim();
+  const targetItem = findExact(targetNama);
+  if(!targetItem){ alert(`Barang "${targetNama}" tidak ada di daftar stok. Pilih nama yang persis sama dari daftar.`); return; }
+
+  const btn = $('mutsave_'+key.replace('#','_')); if(btn){ btn.disabled=true; btn.textContent='…'; }
+  try {
+    if(targetItem.id !== itemId){
+      // pindah ke barang lain
+      arr.splice(idx,1);
+      const tArr = [...(targetItem.mutasi||[]), newM];
+      await updateDoc(doc(db, COLL, itemId), { mutasi: arr });
+      await updateDoc(doc(db, COLL, targetItem.id), { mutasi: tArr });
+    } else {
+      arr[idx] = newM;
+      await updateDoc(doc(db, COLL, itemId), { mutasi: arr });
+    }
+    mutDraft = {}; // index bisa bergeser → reset semua draft, onSnapshot re-render
+  } catch(e){
+    alert('Gagal: '+e.message);
+    if(btn){ btn.disabled=false; btn.textContent='💾'; }
+  }
+};
+
+window.mutDel = async function(itemId, idx){
+  const it = items.find(x=>x.id===itemId); if(!it) return;
+  const m = (it.mutasi||[])[idx]; if(!m) return;
+  if(!confirm(`Hapus mutasi ${m.jenis} ${num(m.qty)} (${it.nama}) tanggal ${isoToDisp(m.tanggal)}?`)) return;
+  const arr = (it.mutasi||[]).filter((_,x)=>x!==idx);
+  try { mutDraft = {}; await updateDoc(doc(db, COLL, itemId), { mutasi: arr }); }
+  catch(e){ alert('Gagal: '+e.message); }
 };
 
 // ===================== HITUNG FISIK =====================
@@ -841,7 +1276,6 @@ window.fisChange = function(id, f, v){
     eceran: it.fisik ? it.fisik.eceran : ''
   };
   fisikDraft[id][f] = v;
-  // update kg & selisih & tombol tanpa render ulang (kursor tetap)
   const isi = parseFloat(it.isiDrum)||0;
   const kg = parseId(fisikDraft[id].drum)*isi + parseId(fisikDraft[id].eceran);
   const teo = teoritisOf(it);
@@ -894,15 +1328,16 @@ window.kunciOpname = async function(){
 window.copyStok = function(){
   const list = filteredItems('fltCari','fltKat', fltMinusOn);
   if(!list.length){ alert('Tidak ada data untuk dicopy.'); return; }
-  const header = ['Nama','Kategori','Sat','Isi/Drum','Stok Awal','Masuk','Keluar','Teoritis','Teoritis (drum)','Fisik','Selisih','Status'].join('\t');
+  const header = ['Nama','Kategori','Sat','Isi/Drum','Harga','Stok Awal','Masuk','Keluar','Teoritis','Teoritis (drum)','Nilai','Fisik','Selisih','Status'].join('\t');
   const rows = list.map(it => {
     const teo = teoritisOf(it), fis = fisikKgOf(it), s = selisihOf(it);
     const isi = parseFloat(it.isiDrum)||0;
     const st = s===null ? 'BELUM' : Math.abs(s)<=0.01 ? 'COCOK' : 'SELISIH';
     const fmtN = v => String(Math.round(v*100)/100).replace('.',',');
-    return [it.nama, it.kat||'', it.sat||'kg', isi||'', fmtN(it.stokAwal||0),
+    return [it.nama, it.kat||'', it.sat||'kg', isi||'', hargaOf(it)||'', fmtN(it.stokAwal||0),
       fmtN(sumMut(it,'masuk')), fmtN(sumMut(it,'keluar')), fmtN(teo),
-      isi>0?drumStr(teo,isi):'', fis===null?'':fmtN(fis), s===null?'':fmtN(s), st].join('\t');
+      isi>0?drumStr(teo,isi):'', hargaOf(it)>0?Math.round(nilaiOf(it)):'',
+      fis===null?'':fmtN(fis), s===null?'':fmtN(s), st].join('\t');
   });
   const tsv = header + '\n' + rows.join('\n');
   navigator.clipboard.writeText(tsv).then(()=>showMsg('stokOk','✔ Berhasil dicopy! Langsung paste (Ctrl+V) di Google Sheet.'))
@@ -918,6 +1353,7 @@ window.copyStok = function(){
 document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ window.closeHist(); window.closeEdit(); } });
 
 // ===================== INIT =====================
+updateJenisSeg();
 setTab('dash');
 </script>
 
