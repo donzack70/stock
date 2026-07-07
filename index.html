@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Opname — CV Warna Indah Chemical</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;background:#f5f5f3;color:#1a1a1a;min-height:100vh}
+.topbar{background:#fff;border-bottom:1px solid #e5e5e3;padding:11px 20px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:100;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.topbar .sub{font-size:11px;color:#999}
+.badge{font-size:11px;padding:2px 10px;border-radius:20px;font-weight:600}
+.badge-on{background:#e8f4f4;color:#0e7c7b}
+.badge-off{background:#f0f0ee;color:#999}
+.main{max-width:1300px;margin:0 auto;padding:16px 14px 60px}
+.card{background:#fff;border:1px solid #e8e8e6;border-radius:12px;padding:14px 18px;margin-bottom:12px}
+.card-title{font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.card-title .spacer{flex:1}
+.field label{font-size:11px;color:#888;display:block;margin-bottom:3px;font-weight:500}
+.field input,.field select,.field textarea{width:100%;padding:7px 9px;border:1px solid #ddd;border-radius:7px;font-size:13px;background:#fafafa;font-family:inherit}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:#0e7c7b;background:#fff}
+.btn{padding:8px 16px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-t{background:#0e7c7b;color:#fff}.btn-t:hover:not(:disabled){background:#0a6362}
+.btn-g{background:#1e7a45;color:#fff}.btn-g:hover:not(:disabled){background:#186338}
+.btn-r{background:#c0392b;color:#fff}.btn-r:hover:not(:disabled){background:#a03024}
+.btn-line{background:#fff;color:#555;border:1px solid #ddd}.btn-line:hover:not(:disabled){background:#f7f7f5}
+.btn-sm{padding:5px 10px;font-size:12px;border-radius:7px}
+.ok-msg{background:#f0faf4;border:1px solid #b2dfc5;border-radius:8px;padding:8px 12px;font-size:12px;color:#2d8a4e;margin-top:8px;display:none}
+.err-msg{background:#fdf5f5;border:1px solid #f5c6c6;border-radius:8px;padding:8px 12px;font-size:12px;color:#c0392b;margin-top:8px;display:none}
+.hint{font-size:11px;color:#aaa;margin-top:5px}
+.spinner{width:13px;height:13px;border:2px solid #ddd;border-top-color:#555;border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:-2px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.mono{font-family:Consolas,Menlo,monospace;font-size:12px}
+textarea.mono{min-height:100px;resize:vertical}
+/* GATE */
+.gate{max-width:460px;margin:50px auto}
+.gate .logo{text-align:center;font-size:34px;margin-bottom:6px}
+.gate h2{text-align:center;font-size:17px;margin-bottom:2px}
+.gate .gsub{text-align:center;font-size:12px;color:#999;margin-bottom:18px}
+/* TABS */
+.tabbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.tab-btn{padding:9px 20px;border:1px solid #ddd;border-radius:10px;background:#ececea;color:#888;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}
+.tab-btn:hover{background:#f3f3f1}
+.tab-btn.act{background:#e8f4f4;color:#0e7c7b;border-color:#9ecfce;box-shadow:0 1px 4px rgba(14,124,123,.12)}
+/* CHIPS */
+.chips{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.chip{flex:1;min-width:150px;background:#fff;border:1px solid #e8e8e6;border-radius:12px;padding:12px 16px}
+.chip .lbl{font-size:11px;color:#888;margin-bottom:3px}
+.chip .val{font-size:19px;font-weight:700}
+.chip.teal .val{color:#0e7c7b}
+.chip.green .val{color:#1e7a45}
+.chip.warn .val{color:#b7600a}
+.chip.red .val{color:#c0392b}
+/* TABLE */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;padding:7px 8px;border-bottom:1.5px solid #e8e8e6;color:#888;font-weight:500;white-space:nowrap;font-size:11px;background:#fafafa}
+td{padding:6px 8px;border-bottom:1px solid #f0f0ee;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#fafafe}
+.r{text-align:right;white-space:nowrap}
+.nama-cell{font-weight:600}
+.nama-cell .kat{font-weight:400;font-size:10.5px;color:#aaa;display:block}
+.drum-note{font-size:10.5px;color:#0e7c7b;display:block;white-space:nowrap}
+.neg{color:#c0392b;font-weight:700}
+.pos{color:#1e7a45;font-weight:700}
+.zero{color:#bbb}
+.st{font-size:10.5px;padding:2px 9px;border-radius:20px;font-weight:600;white-space:nowrap}
+.st-cocok{background:#f0faf4;color:#2d8a4e;border:1px solid #b2dfc5}
+.st-selisih{background:#fdf5f5;color:#c0392b;border:1px solid #f0c5c5}
+.st-belum{background:#f0f0ee;color:#999;border:1px solid #e0e0de}
+.icon-btn{background:none;border:1px solid #e0e0de;cursor:pointer;padding:4px 8px;border-radius:6px;font-size:12px;color:#555;margin-left:3px}
+.icon-btn:hover{background:#f7f7f5}
+.icon-btn.danger:hover{color:#c0392b;border-color:#f0c5c5;background:#fdf5f5}
+.empty{text-align:center;color:#bbb;padding:26px 0;font-size:13px}
+/* FILTER */
+.filter-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.filter-row input[type=text]{flex:1;min-width:160px;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;background:#fafafa}
+.filter-row select{padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;background:#fafafa}
+.flt-btn{padding:6px 13px;border:1px solid #ddd;border-radius:20px;background:#fafafa;color:#777;font-size:12px;font-weight:600;cursor:pointer}
+.flt-btn.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+/* IMPORT PREVIEW */
+.prev-tbl input{padding:5px 7px;border:1px solid #ddd;border-radius:6px;font-size:12px;background:#fafafa;width:100%}
+.prev-tbl input:focus{outline:none;border-color:#0e7c7b;background:#fff}
+.prev-tbl input.warn{border-color:#b7600a;background:#fffbf0}
+.prev-tbl input.ok{border-color:#8fc7b3}
+.tag{font-size:10px;padding:1px 8px;border-radius:20px;font-weight:600;white-space:nowrap}
+.tag-masuk{background:#eef6f0;color:#1e7a45}
+.tag-keluar{background:#fdf6ec;color:#b7600a}
+.tag-dup{background:#fdf5f5;color:#c0392b;border:1px solid #f0c5c5}
+.tag-fuzzy{background:#f3edfa;color:#7d3c98}
+/* FISIK */
+.fis-inp{width:64px;padding:5px 6px;border:1px solid #ddd;border-radius:6px;font-size:12.5px;text-align:right;background:#fafafa}
+.fis-inp:focus{outline:none;border-color:#0e7c7b;background:#fff}
+.fis-inp.changed{border-color:#b7600a;background:#fffbf0}
+.fis-kg{font-size:11px;color:#888;white-space:nowrap}
+/* MODAL */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:500;display:none;align-items:flex-start;justify-content:center;padding:30px 14px;overflow-y:auto}
+.modal.show{display:flex}
+.modal-box{background:#fff;border-radius:14px;padding:18px 20px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.2)}
+.modal-box.wide{max-width:680px}
+.modal-box h3{font-size:15px;margin-bottom:2px}
+.modal-box .sub{font-size:12px;color:#999;margin-bottom:12px}
+.modal-close-row{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.e-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.hist-row{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #f5f5f3;font-size:12px;flex-wrap:wrap}
+.hist-row:last-child{border-bottom:none}
+.hist-wrap{border:1px solid #eee;border-radius:9px;max-height:320px;overflow-y:auto}
+@media(max-width:700px){.e-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div style="flex:1">
+    <div style="font-size:15px;font-weight:600">📦 Stock Opname</div>
+    <div class="sub">CV Warna Indah Chemical — Surabaya</div>
+  </div>
+  <span class="badge badge-off" id="connBadge">⬤ Menghubungkan...</span>
+  <span id="userBox" style="display:none;font-size:12px;color:#666"></span>
+  <button class="btn btn-line btn-sm" id="logoutBtn" style="display:none" onclick="doLogout()">Keluar</button>
+</div>
+
+<div class="main">
+
+<!-- ============ GATE ============ -->
+<div id="gate" class="gate">
+  <div class="logo">📦</div>
+  <h2>Stock Opname</h2>
+  <div class="gsub">CV Warna Indah Chemical</div>
+  <div class="card">
+    <div class="field" style="margin-bottom:8px"><label>Email</label><input type="email" id="authEmail" placeholder="email@toko.com"></div>
+    <div class="field"><label>Password</label><input type="password" id="authPass" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-t" style="flex:1" onclick="doLogin()" id="loginBtn">Masuk</button>
+    </div>
+    <div class="err-msg" id="authErr"></div>
+    <div class="hint">Pakai akun yang sama dengan app Piutang &amp; Hutang.</div>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app" style="display:none">
+
+<div class="tabbar">
+  <button class="tab-btn act" id="tb_dash" onclick="setTab('dash')">📊 Dashboard</button>
+  <button class="tab-btn" id="tb_stok" onclick="setTab('stok')">📦 Stok</button>
+  <button class="tab-btn" id="tb_imp" onclick="setTab('imp')">📋 Import Mutasi</button>
+  <button class="tab-btn" id="tb_fisik" onclick="setTab('fisik')">✏️ Hitung Fisik</button>
+</div>
+
+<div class="chips" id="chips"></div>
+
+<!-- ====== DASHBOARD ====== -->
+<div id="tab_dash" style="display:none">
+  <div class="card">
+    <div class="card-title" style="color:#c0392b">⚠ Selisih Terbesar (fisik vs teoritis)</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Barang</th><th class="r">Teoritis</th><th class="r">Fisik</th><th class="r">Selisih</th></tr></thead>
+      <tbody id="dashSelisih"></tbody>
+    </table></div>
+  </div>
+  <div class="card">
+    <div class="card-title" style="color:#b7600a">🔻 Stok Teoritis Minus / Nol</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Barang</th><th class="r">Awal</th><th class="r">Masuk</th><th class="r">Keluar</th><th class="r">Teoritis</th></tr></thead>
+      <tbody id="dashMinus"></tbody>
+    </table></div>
+  </div>
+  <div class="card">
+    <div class="card-title">📥 Mutasi Terakhir</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th style="width:78px">Tanggal</th><th style="width:64px"></th><th>Barang</th><th>Pihak</th><th class="r">Qty</th></tr></thead>
+      <tbody id="dashMutasi"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ====== STOK ====== -->
+<div id="tab_stok" style="display:none">
+  <div class="card">
+    <div class="card-title">📦 Daftar Stok
+      <span class="spacer"></span>
+      <button class="btn btn-line btn-sm" onclick="toggleMasterImp()" id="mImpToggle">📥 Import master (paste)</button>
+      <button class="btn btn-t btn-sm" onclick="openEdit(null)">➕ Tambah barang</button>
+      <button class="btn btn-line btn-sm" onclick="copyStok()">📋 Copy ke Google Sheet</button>
+    </div>
+    <div id="mImpBody" style="display:none;border:1px dashed #ddd;border-radius:9px;padding:10px 12px;margin-bottom:10px;background:#fafaf8">
+      <div class="hint" style="margin:0 0 6px">Paste dari Excel/Google Sheet, kolom (dengan baris judul): <b>Nama, Kategori, Sat, Isi per Drum, Stok Awal</b>. Kolom Kategori / Isi per Drum / Stok Awal boleh kosong. Barang yang namanya sudah ada akan dilewati.</div>
+      <div class="field"><textarea id="mImpTsv" class="mono" placeholder="Nama	Kategori	Sat	Isi/Drum	Stok Awal&#10;NAPHTOL ASBS	Naphtol	kg	25	183"></textarea></div>
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+        <button class="btn btn-t btn-sm" onclick="importMaster()" id="mImpBtn">💾 Import master</button>
+        <span class="hint" style="margin:0" id="mImpInfo"></span>
+      </div>
+      <div class="err-msg" id="mImpErr"></div>
+      <div class="ok-msg" id="mImpOk"></div>
+    </div>
+    <div class="filter-row">
+      <input type="text" id="fltCari" placeholder="Cari nama barang..." oninput="renderStok()">
+      <select id="fltKat" onchange="renderStok()"><option value="">Semua kategori</option></select>
+      <button class="flt-btn" id="fltMinus" onclick="toggleFltMinus()">🔻 Hanya minus</button>
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>Barang</th>
+        <th class="r" title="Isi per drum">Isi/Drum</th>
+        <th class="r">Awal</th>
+        <th class="r">Masuk</th>
+        <th class="r">Keluar</th>
+        <th class="r">Teoritis</th>
+        <th class="r">Fisik</th>
+        <th class="r">Selisih</th>
+        <th style="width:70px">Status</th>
+        <th style="width:118px"></th>
+      </tr></thead>
+      <tbody id="stokBody"></tbody>
+    </table></div>
+    <div class="ok-msg" id="stokOk">✔ Berhasil dicopy! Langsung paste (Ctrl+V) di Google Sheet.</div>
+  </div>
+</div>
+
+<!-- ====== IMPORT MUTASI ====== -->
+<div id="tab_imp" style="display:none">
+  <div class="card">
+    <div class="card-title">📋 Import dari App Nota</div>
+    <div class="hint" style="margin:0 0 8px">Paste hasil <b>"Copy ke Google Sheet"</b> dari app nota (termasuk baris judul). Aplikasi mendeteksi otomatis: data <b>Penjualan → barang keluar</b>, data <b>Barang Masuk → barang masuk</b>. Nama barang dicocokkan otomatis ke daftar stok — bisa diperiksa &amp; diubah dulu sebelum disimpan.</div>
+    <div class="field"><textarea id="impTsv" class="mono" placeholder="Paste di sini..."></textarea></div>
+    <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-line" onclick="parseImport()">🔍 Baca data</button>
+      <span class="hint" style="margin:0">Baris ongkir / barang non-stok bisa dihilangkan centangnya di preview.</span>
+    </div>
+    <div class="err-msg" id="impErr"></div>
+    <div id="impPreview" style="margin-top:10px"></div>
+  </div>
+</div>
+
+<!-- ====== HITUNG FISIK ====== -->
+<div id="tab_fisik" style="display:none">
+  <div class="card">
+    <div class="card-title">✏️ Hitung Fisik Gudang
+      <span class="spacer"></span>
+      <button class="btn btn-r btn-sm" onclick="kunciOpname()">🔒 Kunci opname &amp; mulai periode baru</button>
+    </div>
+    <div class="hint" style="margin:0 0 8px">Isi hasil hitungan gudang dalam <b>drum + eceran</b> (atau eceran saja kalau tidak pakai drum). Total kg dihitung otomatis dari setting isi per drum. Klik 💾 di tiap baris untuk menyimpan. Setelah semua dihitung, klik "Kunci opname" — stok fisik jadi stok awal periode berikutnya.</div>
+    <div class="filter-row">
+      <input type="text" id="fisCari" placeholder="Cari nama barang..." oninput="renderFisik()">
+      <select id="fisKat" onchange="renderFisik()"><option value="">Semua kategori</option></select>
+      <button class="flt-btn" id="fisBelum" onclick="toggleFisBelum()">⏳ Belum dihitung</button>
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>Barang</th>
+        <th class="r">Teoritis</th>
+        <th class="r" style="width:78px">Fisik: Drum</th>
+        <th class="r" style="width:88px">Eceran</th>
+        <th class="r">= Total</th>
+        <th class="r">Selisih</th>
+        <th style="width:96px"></th>
+      </tr></thead>
+      <tbody id="fisikBody"></tbody>
+    </table></div>
+  </div>
+</div>
+
+</div><!-- /app -->
+</div><!-- /main -->
+
+<!-- ============ MODAL EDIT BARANG ============ -->
+<div class="modal" id="editModal">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <h3 id="emTitle">Tambah Barang</h3>
+    <div class="sub">Isi per drum bisa diubah kapan saja tanpa mengubah data mutasi.</div>
+    <div class="field" style="margin-bottom:8px"><label>Nama barang</label><input type="text" id="eNama" placeholder="Contoh: GARAM BIRU B 27% LUTA"></div>
+    <div class="e-grid">
+      <div class="field"><label>Kategori</label><input type="text" id="eKat" list="katList" placeholder="Contoh: Garam"></div>
+      <div class="field"><label>Satuan</label><input type="text" id="eSat" placeholder="kg"></div>
+      <div class="field"><label>Isi per drum (dalam satuan) — 0 jika tanpa drum</label><input type="text" inputmode="decimal" id="eIsiDrum" placeholder="cth: 25"></div>
+      <div class="field"><label>Stok awal periode</label><input type="text" inputmode="decimal" id="eAwal" placeholder="cth: 110"></div>
+    </div>
+    <div class="hint" id="eDrumHint"></div>
+    <div class="err-msg" id="eErr"></div>
+    <div class="modal-close-row">
+      <button class="btn btn-r btn-sm" id="eDelBtn" style="display:none;margin-right:auto" onclick="delItemFromModal()">🗑 Hapus barang</button>
+      <button class="btn btn-line" onclick="closeEdit()">Batal</button>
+      <button class="btn btn-t" onclick="saveEdit()" id="eSaveBtn">💾 Simpan</button>
+    </div>
+  </div>
+</div>
+<datalist id="katList"></datalist>
+<datalist id="itemList"></datalist>
+
+<!-- ============ MODAL RIWAYAT ============ -->
+<div class="modal" id="histModal" onclick="closeHist()">
+  <div class="modal-box wide" onclick="event.stopPropagation()">
+    <h3 id="hmTitle">Riwayat</h3>
+    <div class="sub" id="hmSub"></div>
+    <div class="hist-wrap" id="hmList"></div>
+    <div class="hint">Salah import? Klik ✕ untuk menghapus satu mutasi — stok teoritis langsung terkoreksi.</div>
+    <div class="modal-close-row"><button class="btn btn-line" onclick="closeHist()">Tutup</button></div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// ===================== FIREBASE CONFIG (sama dengan app piutang) =====================
+const firebaseConfig = {
+  apiKey: "AIzaSyCx2bGvF9Szh7-q4PPiZxvGwPPxjc4Kt30",
+  authDomain: "warna-indah.firebaseapp.com",
+  projectId: "warna-indah",
+  storageBucket: "warna-indah.firebasestorage.app",
+  messagingSenderId: "888220688334",
+  appId: "1:888220688334:web:89fcbcf1d375448c8a159f"
+};
+const COLL = 'stok_items'; // koleksi khusus app ini — terpisah dari 'transaksi'
+
+// ===================== HELPERS =====================
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const pad2 = n => String(n).padStart(2,'0');
+// Angka Indonesia: 1.234,5
+const num = v => { const n = Math.round((parseFloat(v)||0)*100)/100; return n.toLocaleString('id-ID',{maximumFractionDigits:2}); };
+// Terima "4,5" dan "4.5" dan "1.234,5"
+const parseId = v => { let s = String(v ?? '').trim(); if(!s) return 0;
+  if(s.includes(',')) s = s.replace(/\./g,'').replace(',','.');
+  return parseFloat(s.replace(/[^0-9.\-]/g,'')) || 0; };
+const isoToDisp = iso => { if(!iso) return ''; const p = String(iso).split('-'); return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : iso; };
+const dispToIso = d => { const p = String(d||'').trim().split('/'); return p.length===3 ? p[2]+'-'+pad2(parseInt(p[1])||1)+'-'+pad2(parseInt(p[0])||1) : ''; };
+function showMsg(id, txt, ms=3500){ const el=$(id); el.textContent=txt; el.style.display='block'; if(ms) setTimeout(()=>el.style.display='none', ms); }
+
+// Breakdown drum: 110 kg @ isiDrum 25 -> "4 drum + 10"
+function drumStr(kg, isiDrum){
+  if(!isiDrum || isiDrum <= 0 || kg === 0) return '';
+  const neg = kg < 0; const a = Math.abs(kg);
+  const d = Math.floor(a / isiDrum);
+  const sisa = Math.round((a - d*isiDrum)*100)/100;
+  let s = '';
+  if(d > 0) s += d + ' drum';
+  if(sisa > 0) s += (d>0?' + ':'') + num(sisa);
+  if(!s) s = '0';
+  return (neg?'−(':'') + s + (neg?')':'');
+}
+
+// ===================== STATE =====================
+let auth=null, db=null, unsub=null;
+let items = [];         // semua barang dari Firestore
+let curTab = 'dash';
+let fltMinusOn = false, fisBelumOn = false;
+let editDocId = null, histDocId = null;
+let importRows = [];    // hasil parse import
+let fisikDraft = {};    // {docId: {drum, eceran}} perubahan belum disimpan
+
+const sumMut = (it, jenis) => (it.mutasi||[]).filter(m=>m.jenis===jenis).reduce((s,m)=>s+(parseFloat(m.qty)||0),0);
+const teoritisOf = it => (parseFloat(it.stokAwal)||0) + sumMut(it,'masuk') - sumMut(it,'keluar');
+const fisikKgOf = it => it.fisik ? (parseFloat(it.fisik.drum)||0)*(parseFloat(it.isiDrum)||0) + (parseFloat(it.fisik.eceran)||0) : null;
+const selisihOf = it => { const f = fisikKgOf(it); return f===null ? null : Math.round((f - teoritisOf(it))*100)/100; };
+
+// ===================== FIREBASE INIT =====================
+const fbApp = initializeApp(firebaseConfig);
+auth = getAuth(fbApp);
+db = getFirestore(fbApp);
+$('connBadge').textContent = '⬤ Terhubung: ' + firebaseConfig.projectId;
+$('connBadge').className = 'badge badge-on';
+
+onAuthStateChanged(auth, user => {
+  if(user){
+    $('gate').style.display='none'; $('app').style.display='block';
+    $('userBox').style.display='inline'; $('userBox').textContent = user.email;
+    $('logoutBtn').style.display='inline-block';
+    startListening();
+  } else {
+    $('gate').style.display='block'; $('app').style.display='none';
+    $('userBox').style.display='none'; $('logoutBtn').style.display='none';
+    if(unsub){ unsub(); unsub=null; }
+  }
+});
+
+window.doLogin = async function(){
+  $('authErr').style.display='none';
+  const btn = $('loginBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Masuk...';
+  try { await signInWithEmailAndPassword(auth, $('authEmail').value.trim(), $('authPass').value); }
+  catch(e){
+    const m = {'auth/invalid-credential':'Email atau password salah.','auth/user-not-found':'Akun tidak ditemukan.','auth/wrong-password':'Password salah.','auth/invalid-email':'Format email salah.','auth/too-many-requests':'Terlalu banyak percobaan — tunggu sebentar.'};
+    showMsg('authErr', m[e.code] || ('Gagal masuk: '+e.message), 6000);
+  }
+  btn.disabled = false; btn.textContent = 'Masuk';
+};
+window.doLogout = function(){ if(auth) signOut(auth); };
+
+function startListening(){
+  if(unsub) unsub();
+  const q = query(collection(db, COLL), orderBy('nama'));
+  unsub = onSnapshot(q, snap => {
+    items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderAll();
+  }, err => {
+    alert('Gagal membaca database: '+err.message+'\n\nCek Rules Firestore — koleksi "'+COLL+'" harus diizinkan untuk user login.');
+  });
+}
+
+// ===================== MATCHING NAMA =====================
+function findExact(nama){
+  if(!nama) return null;
+  const n = nama.trim().toLowerCase();
+  return items.find(it => it.nama.toLowerCase() === n) || null;
+}
+function trigrams(s){ const set=new Set(); const p=' '+s+' '; for(let i=0;i<p.length-2;i++) set.add(p.slice(i,i+3)); return set; }
+function similarity(a,b){ const ta=trigrams(a), tb=trigrams(b); let c=0; ta.forEach(t=>{if(tb.has(t))c++;}); return (2*c)/(ta.size+tb.size); }
+function fuzzyFind(nama){
+  if(!nama || nama.trim().length < 2) return null;
+  const n = nama.trim().toLowerCase();
+  // 1: contained
+  const t1 = items.find(it => { const m = it.nama.toLowerCase(); return m.includes(n) || n.includes(m); });
+  if(t1) return t1;
+  // 2: semua kata ada
+  const words = n.split(/\s+/).filter(w=>w.length>=3);
+  if(words.length){
+    const t2 = items.find(it => words.every(w => it.nama.toLowerCase().includes(w)));
+    if(t2) return t2;
+  }
+  // 3: trigram
+  let best=null, bs=0;
+  items.forEach(it => { const s = similarity(n, it.nama.toLowerCase()); if(s>bs){bs=s;best=it;} });
+  return bs >= 0.30 ? best : null;
+}
+
+// ===================== TABS & RENDER =====================
+window.setTab = function(t){
+  curTab = t;
+  ['dash','stok','imp','fisik'].forEach(x => {
+    $('tb_'+x).className = 'tab-btn' + (x===t?' act':'');
+    $('tab_'+x).style.display = x===t ? 'block':'none';
+  });
+  renderAll();
+};
+
+function renderAll(){
+  renderChips();
+  renderKatOptions();
+  if(curTab==='dash') renderDash();
+  if(curTab==='stok') renderStok();
+  if(curTab==='fisik') renderFisik();
+  $('itemList').innerHTML = items.map(it=>`<option value="${esc(it.nama)}">`).join('');
+}
+
+function renderKatOptions(){
+  const kats = [...new Set(items.map(it=>it.kat).filter(Boolean))].sort();
+  ['fltKat','fisKat'].forEach(id => {
+    const sel = $(id); const cur = sel.value;
+    sel.innerHTML = '<option value="">Semua kategori</option>' + kats.map(k=>`<option${k===cur?' selected':''}>${esc(k)}</option>`).join('');
+  });
+  $('katList').innerHTML = kats.map(k=>`<option value="${esc(k)}">`).join('');
+}
+
+function renderChips(){
+  const total = items.length;
+  const dihitung = items.filter(it=>it.fisik).length;
+  const selisih = items.filter(it=>{ const s = selisihOf(it); return s!==null && Math.abs(s) > 0.01; }).length;
+  const minus = items.filter(it=>teoritisOf(it) < -0.01).length;
+  $('chips').innerHTML = `
+    <div class="chip teal"><div class="lbl">Total barang</div><div class="val">${total}</div></div>
+    <div class="chip green"><div class="lbl">Sudah dihitung fisik</div><div class="val">${dihitung} / ${total}</div></div>
+    <div class="chip ${selisih>0?'red':'green'}"><div class="lbl">Ada selisih</div><div class="val">${selisih}</div></div>
+    <div class="chip ${minus>0?'warn':'green'}"><div class="lbl">Stok teoritis minus</div><div class="val">${minus}</div></div>`;
+}
+
+function renderDash(){
+  // selisih terbesar
+  const sel = items.map(it=>({it, s:selisihOf(it)})).filter(x=>x.s!==null && Math.abs(x.s)>0.01)
+    .sort((a,b)=>Math.abs(b.s)-Math.abs(a.s)).slice(0,10);
+  $('dashSelisih').innerHTML = sel.length
+    ? sel.map(({it,s})=>`<tr>
+        <td class="nama-cell">${esc(it.nama)}<span class="kat">${esc(it.kat||'')}</span></td>
+        <td class="r">${num(teoritisOf(it))}</td>
+        <td class="r">${num(fisikKgOf(it))}</td>
+        <td class="r ${s<0?'neg':'pos'}">${s>0?'+':''}${num(s)}</td></tr>`).join('')
+    : `<tr><td colspan="4" class="empty">Tidak ada selisih — atau belum ada hitungan fisik.</td></tr>`;
+
+  // minus
+  const minus = items.filter(it=>teoritisOf(it) <= 0.01 && (it.stokAwal>0 || (it.mutasi||[]).length))
+    .sort((a,b)=>teoritisOf(a)-teoritisOf(b)).slice(0,12);
+  $('dashMinus').innerHTML = minus.length
+    ? minus.map(it=>`<tr>
+        <td class="nama-cell">${esc(it.nama)}<span class="kat">${esc(it.kat||'')}</span></td>
+        <td class="r">${num(it.stokAwal)}</td>
+        <td class="r">${num(sumMut(it,'masuk'))}</td>
+        <td class="r">${num(sumMut(it,'keluar'))}</td>
+        <td class="r ${teoritisOf(it)<-0.01?'neg':'zero'}">${num(teoritisOf(it))}</td></tr>`).join('')
+    : `<tr><td colspan="5" class="empty">Tidak ada stok minus 🎉</td></tr>`;
+
+  // mutasi terakhir
+  const muts = [];
+  items.forEach(it => (it.mutasi||[]).forEach(m => muts.push({...m, nama: it.nama})));
+  muts.sort((a,b)=>String(b.tanggal).localeCompare(String(a.tanggal)));
+  $('dashMutasi').innerHTML = muts.length
+    ? muts.slice(0,15).map(m=>`<tr>
+        <td>${isoToDisp(m.tanggal)}</td>
+        <td><span class="tag ${m.jenis==='masuk'?'tag-masuk':'tag-keluar'}">${m.jenis==='masuk'?'MASUK':'KELUAR'}</span></td>
+        <td class="nama-cell">${esc(m.nama)}</td>
+        <td style="color:#888">${esc(m.pihak||'')}</td>
+        <td class="r">${num(m.qty)}</td></tr>`).join('')
+    : `<tr><td colspan="5" class="empty">Belum ada mutasi. Import dari app nota di tab 📋 Import Mutasi.</td></tr>`;
+}
+
+// ===================== TAB STOK =====================
+window.toggleFltMinus = function(){ fltMinusOn = !fltMinusOn; $('fltMinus').classList.toggle('active', fltMinusOn); renderStok(); };
+
+function filteredItems(cariId, katId, minusOnly){
+  const cari = $(cariId).value.trim().toLowerCase();
+  const kat = $(katId).value;
+  let list = items;
+  if(cari) list = list.filter(it => it.nama.toLowerCase().includes(cari));
+  if(kat) list = list.filter(it => it.kat === kat);
+  if(minusOnly) list = list.filter(it => teoritisOf(it) < -0.01);
+  return list;
+}
+
+window.renderStok = function(){
+  const list = filteredItems('fltCari','fltKat', fltMinusOn);
+  const tbody = $('stokBody');
+  if(!list.length){ tbody.innerHTML = `<tr><td colspan="10" class="empty">${items.length?'Tidak ada yang cocok dengan filter.':'Belum ada barang. Klik "➕ Tambah barang" atau "📥 Import master".'}</td></tr>`; return; }
+  tbody.innerHTML = list.map(it => {
+    const teo = teoritisOf(it), fis = fisikKgOf(it), s = selisihOf(it);
+    const isi = parseFloat(it.isiDrum)||0;
+    const stHtml = s===null ? '<span class="st st-belum">BELUM</span>'
+      : Math.abs(s)<=0.01 ? '<span class="st st-cocok">COCOK</span>'
+      : '<span class="st st-selisih">SELISIH</span>';
+    return `<tr>
+      <td class="nama-cell">${esc(it.nama)}<span class="kat">${esc(it.kat||'')} · ${esc(it.sat||'kg')}</span></td>
+      <td class="r">${isi>0?num(isi):'<span class="zero">-</span>'}</td>
+      <td class="r">${num(it.stokAwal)}</td>
+      <td class="r" style="color:#1e7a45">${sumMut(it,'masuk')>0?num(sumMut(it,'masuk')):'-'}</td>
+      <td class="r" style="color:#b7600a">${sumMut(it,'keluar')>0?num(sumMut(it,'keluar')):'-'}</td>
+      <td class="r ${teo<-0.01?'neg':''}" style="font-weight:700">${num(teo)}${isi>0?`<span class="drum-note">${drumStr(teo,isi)}</span>`:''}</td>
+      <td class="r">${fis===null?'<span class="zero">-</span>':num(fis)}</td>
+      <td class="r">${s===null?'<span class="zero">-</span>':`<span class="${s<0?'neg':s>0?'pos':'zero'}">${s>0?'+':''}${num(s)}</span>`}</td>
+      <td>${stHtml}</td>
+      <td style="white-space:nowrap">
+        <button class="icon-btn" onclick="openHist('${it.id}')" title="Riwayat mutasi">📜</button>
+        <button class="icon-btn" onclick="openEdit('${it.id}')" title="Ubah barang / isi drum">✏️</button>
+      </td>
+    </tr>`;
+  }).join('');
+};
+
+// ===================== IMPORT MASTER =====================
+window.toggleMasterImp = function(){
+  const b = $('mImpBody'); const open = b.style.display !== 'none';
+  b.style.display = open ? 'none':'block';
+};
+
+window.importMaster = async function(){
+  $('mImpErr').style.display='none';
+  const raw = $('mImpTsv').value.trim();
+  if(!raw){ showMsg('mImpErr','Paste data dulu.'); return; }
+  const lines = raw.split('\n').map(l=>l.split('\t'));
+  const header = lines[0].map(h=>h.trim().toLowerCase());
+  const idx = names => header.findIndex(h => names.some(n=>h.includes(n)));
+  let iNama = idx(['nama']);
+  const hasHeader = iNama >= 0;
+  const iKat = idx(['kategori','kat']), iSat = idx(['sat']), iIsi = idx(['isi','drum']), iAwal = idx(['stok','awal']);
+  const start = hasHeader ? 1 : 0;
+  if(!hasHeader) iNama = 0;
+  const existing = new Set(items.map(it=>it.nama.toLowerCase()));
+  const btn = $('mImpBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Import...';
+  let n=0, skip=0;
+  try {
+    let batch = writeBatch(db), inBatch = 0;
+    for(let i=start;i<lines.length;i++){
+      const r = lines[i];
+      const nama = String(r[iNama]||'').trim();
+      if(!nama) continue;
+      if(existing.has(nama.toLowerCase())){ skip++; continue; }
+      existing.add(nama.toLowerCase());
+      const ref = doc(collection(db, COLL));
+      batch.set(ref, {
+        nama,
+        kat: hasHeader && iKat>=0 ? String(r[iKat]||'').trim() : '',
+        sat: (hasHeader && iSat>=0 ? String(r[iSat]||'').trim() : '') || 'kg',
+        isiDrum: hasHeader && iIsi>=0 ? parseId(r[iIsi]) : 0,
+        stokAwal: hasHeader && iAwal>=0 ? parseId(r[iAwal]) : 0,
+        mutasi: [], fisik: null, createdAt: serverTimestamp()
+      });
+      n++; inBatch++;
+      if(inBatch >= 400){ await batch.commit(); batch = writeBatch(db); inBatch = 0; }
+    }
+    if(inBatch > 0) await batch.commit();
+    showMsg('mImpOk', `✔ ${n} barang diimport${skip?`, ${skip} dilewati (sudah ada)`:''}.`, 6000);
+    $('mImpTsv').value='';
+  } catch(e){ showMsg('mImpErr','Gagal: '+e.message, 7000); }
+  btn.disabled = false; btn.textContent = '💾 Import master';
+};
+
+// ===================== MODAL EDIT BARANG =====================
+window.openEdit = function(id){
+  editDocId = id;
+  $('eErr').style.display='none';
+  if(id){
+    const it = items.find(x=>x.id===id); if(!it) return;
+    $('emTitle').textContent = '✏️ Ubah Barang';
+    $('eNama').value = it.nama; $('eKat').value = it.kat||''; $('eSat').value = it.sat||'kg';
+    $('eIsiDrum').value = it.isiDrum||''; $('eAwal').value = it.stokAwal||'';
+    $('eDelBtn').style.display = 'inline-block';
+    const isi = parseFloat(it.isiDrum)||0;
+    $('eDrumHint').textContent = isi>0 ? `Contoh: teoritis saat ini ${num(teoritisOf(it))} ${it.sat||'kg'} = ${drumStr(teoritisOf(it),isi)}` : '';
+  } else {
+    $('emTitle').textContent = '➕ Tambah Barang';
+    $('eNama').value=''; $('eKat').value=''; $('eSat').value='kg'; $('eIsiDrum').value=''; $('eAwal').value='';
+    $('eDelBtn').style.display='none'; $('eDrumHint').textContent='';
+  }
+  $('editModal').classList.add('show');
+  setTimeout(()=>$('eNama').focus(), 100);
+};
+window.closeEdit = function(){ editDocId=null; $('editModal').classList.remove('show'); };
+
+window.saveEdit = async function(){
+  $('eErr').style.display='none';
+  const nama = $('eNama').value.trim();
+  if(!nama){ showMsg('eErr','Nama belum diisi.'); return; }
+  const dupe = items.find(it => it.nama.toLowerCase() === nama.toLowerCase() && it.id !== editDocId);
+  if(dupe){ showMsg('eErr','Nama barang ini sudah ada.'); return; }
+  const payload = {
+    nama, kat: $('eKat').value.trim(), sat: $('eSat').value.trim()||'kg',
+    isiDrum: parseId($('eIsiDrum').value), stokAwal: parseId($('eAwal').value)
+  };
+  const btn = $('eSaveBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
+  try {
+    if(editDocId) await updateDoc(doc(db, COLL, editDocId), payload);
+    else await addDoc(collection(db, COLL), { ...payload, mutasi: [], fisik: null, createdAt: serverTimestamp() });
+    closeEdit();
+  } catch(e){ showMsg('eErr','Gagal: '+e.message, 6000); }
+  btn.disabled = false; btn.textContent = '💾 Simpan';
+};
+
+window.delItemFromModal = async function(){
+  const it = items.find(x=>x.id===editDocId); if(!it) return;
+  if(!confirm(`Hapus barang "${it.nama}"?\nSemua riwayat mutasi dan hitungan fisiknya ikut terhapus.`)) return;
+  try { await deleteDoc(doc(db, COLL, editDocId)); closeEdit(); }
+  catch(e){ showMsg('eErr','Gagal: '+e.message, 6000); }
+};
+
+// ===================== MODAL RIWAYAT =====================
+window.openHist = function(id){
+  histDocId = id;
+  refreshHist();
+  $('histModal').classList.add('show');
+};
+window.closeHist = function(){ histDocId=null; $('histModal').classList.remove('show'); };
+
+function refreshHist(){
+  const it = items.find(x=>x.id===histDocId); if(!it){ closeHist(); return; }
+  $('hmTitle').textContent = '📜 ' + it.nama;
+  $('hmSub').textContent = `Stok awal ${num(it.stokAwal)} ${it.sat||'kg'} · masuk ${num(sumMut(it,'masuk'))} · keluar ${num(sumMut(it,'keluar'))} · teoritis ${num(teoritisOf(it))}`;
+  const muts = (it.mutasi||[]).map((m,i)=>({...m,_i:i})).sort((a,b)=>String(b.tanggal).localeCompare(String(a.tanggal)));
+  $('hmList').innerHTML = muts.length
+    ? muts.map(m=>`<div class="hist-row">
+        <span style="color:#888;width:74px;flex-shrink:0">${isoToDisp(m.tanggal)}</span>
+        <span class="tag ${m.jenis==='masuk'?'tag-masuk':'tag-keluar'}">${m.jenis==='masuk'?'MASUK':'KELUAR'}</span>
+        <span style="font-weight:600">${num(m.qty)} ${esc(m.sat||'')}</span>
+        <span style="color:#888;flex:1">${esc(m.pihak||'')} ${m.noNota?'· '+esc(m.noNota):''}</span>
+        <button class="icon-btn danger" onclick="delMutasi(${m._i})">✕</button>
+      </div>`).join('')
+    : `<div class="hist-row" style="color:#bbb">Belum ada mutasi untuk barang ini.</div>`;
+}
+
+window.delMutasi = async function(i){
+  const it = items.find(x=>x.id===histDocId); if(!it) return;
+  const m = (it.mutasi||[])[i]; if(!m) return;
+  if(!confirm(`Hapus mutasi ${m.jenis} ${num(m.qty)} tanggal ${isoToDisp(m.tanggal)}?`)) return;
+  const mutasi = (it.mutasi||[]).filter((_,x)=>x!==i);
+  try { await updateDoc(doc(db, COLL, it.id), { mutasi }); setTimeout(refreshHist, 400); }
+  catch(e){ alert('Gagal: '+e.message); }
+};
+
+// ===================== IMPORT MUTASI =====================
+window.parseImport = function(){
+  $('impErr').style.display='none';
+  $('impPreview').innerHTML=''; importRows=[];
+  if(!items.length){ showMsg('impErr','Daftar stok masih kosong — import master barang dulu di tab 📦 Stok.', 7000); return; }
+  const raw = $('impTsv').value.trim();
+  if(!raw){ showMsg('impErr','Paste data TSV dulu.'); return; }
+  const lines = raw.split('\n').map(l=>l.split('\t'));
+  const header = lines[0].map(h=>h.trim().toLowerCase());
+  const idx = name => header.findIndex(h=>h===name.toLowerCase());
+
+  const isPenjualan = idx('pelanggan') >= 0;
+  const isBM = idx('supplier') >= 0;
+  if(!isPenjualan && !isBM){ showMsg('impErr','Baris judul tidak dikenali. Pastikan paste termasuk baris judul (Tanggal, Pelanggan/Supplier, Nama Barang, ...).', 8000); return; }
+  const jenis = isPenjualan ? 'keluar' : 'masuk';
+
+  const iTgl = idx('tanggal'), iPihak = isPenjualan ? idx('pelanggan') : idx('supplier');
+  const iNota = idx('no.nota'), iNama = idx('nama barang'), iQty = idx('qty'), iSat = idx('sat');
+  if(iNama < 0 || iQty < 0){ showMsg('impErr','Kolom "Nama Barang" / "Qty" tidak ditemukan.', 6000); return; }
+
+  // ref yang sudah pernah diimport (deteksi duplikat)
+  const existingRefs = new Set();
+  items.forEach(it => (it.mutasi||[]).forEach(m => { if(m.ref) existingRefs.add(m.ref); }));
+
+  for(let i=1;i<lines.length;i++){
+    const r = lines[i]; if(r.length < 3) continue;
+    const namaRaw = String(r[iNama]||'').trim();
+    const qty = parseId(r[iQty]);
+    if(!namaRaw || qty <= 0) continue;
+    const tanggal = dispToIso(r[iTgl]) || new Date().toISOString().slice(0,10);
+    const pihak = String(r[iPihak]||'').trim();
+    const noNota = String(r[iNota]||'').trim();
+    const sat = iSat>=0 ? String(r[iSat]||'kg').trim() : 'kg';
+    const ref = [jenis, tanggal, noNota, namaRaw, qty].join('|').toLowerCase();
+
+    const exact = findExact(namaRaw);
+    const fuzzy = exact ? null : fuzzyFind(namaRaw);
+    const match = exact || fuzzy;
+    importRows.push({
+      jenis, tanggal, pihak, noNota, sat, qty, namaRaw, ref,
+      target: match ? match.nama : '',
+      fuzzy: !!fuzzy,
+      dup: existingRefs.has(ref),
+      checked: !existingRefs.has(ref)
+    });
+  }
+  if(!importRows.length){ showMsg('impErr','Tidak ada baris valid.', 6000); return; }
+
+  const nDup = importRows.filter(r=>r.dup).length;
+  const nNoMatch = importRows.filter(r=>!r.target).length;
+  $('impPreview').innerHTML = `
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <span class="tag ${jenis==='masuk'?'tag-masuk':'tag-keluar'}" style="font-size:12px;padding:3px 12px">Terdeteksi: BARANG ${jenis.toUpperCase()} — ${importRows.length} baris</span>
+      ${nDup?`<span class="tag tag-dup">${nDup} kemungkinan duplikat (tidak dicentang)</span>`:''}
+      ${nNoMatch?`<span class="tag tag-fuzzy">${nNoMatch} tidak ketemu — pilih manual atau hilangkan centang</span>`:''}
+    </div>
+    <div class="tbl-wrap"><table class="prev-tbl">
+      <thead><tr>
+        <th style="width:30px"><input type="checkbox" id="impAll" checked onchange="impToggleAll(this.checked)" style="width:15px;height:15px"></th>
+        <th style="width:78px">Tanggal</th>
+        <th>Pihak</th>
+        <th>Nama di nota</th>
+        <th style="min-width:200px">→ Barang stok</th>
+        <th class="r" style="width:80px">Qty</th>
+        <th style="width:100px"></th>
+      </tr></thead>
+      <tbody id="impBody2">${importRows.map((r,i)=>impRowHtml(r,i)).join('')}</tbody>
+    </table></div>
+    <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-t" onclick="doImport()" id="impGoBtn">💾 Simpan mutasi terpilih</button>
+      <span class="hint" style="margin:0">Baris tanpa "Barang stok" tidak akan disimpan.</span>
+    </div>
+    <div class="ok-msg" id="impOk"></div>`;
+};
+
+function impRowHtml(r, i){
+  const cls = r.target ? (r.fuzzy ? 'warn' : 'ok') : 'warn';
+  return `<tr>
+    <td><input type="checkbox" id="impC_${i}" ${r.checked?'checked':''} onchange="importRows[${i}].checked=this.checked" style="width:15px;height:15px"></td>
+    <td>${isoToDisp(r.tanggal)}</td>
+    <td style="color:#888;font-size:11.5px">${esc(r.pihak)}${r.noNota?'<br><span style="color:#bbb;font-size:10.5px">'+esc(r.noNota)+'</span>':''}</td>
+    <td style="font-size:11.5px;color:#666">${esc(r.namaRaw)}</td>
+    <td><input class="${cls}" list="itemList" value="${esc(r.target)}" oninput="impOnTarget(${i},this)" placeholder="Pilih barang stok..."></td>
+    <td><input class="r" style="width:74px;text-align:right" value="${String(r.qty).replace('.',',')}" oninput="importRows[${i}].qty=parseIdG(this.value)"></td>
+    <td style="font-size:10.5px">
+      ${r.dup?'<span class="tag tag-dup">duplikat?</span> ':''}
+      ${r.fuzzy?'<span class="tag tag-fuzzy">🔀 fuzzy</span>':''}
+      ${!r.target?'<span style="color:#b7600a">⚠ pilih</span>':''}
+    </td>
+  </tr>`;
+}
+window.parseIdG = parseId;
+window.impOnTarget = function(i, inp){
+  importRows[i].target = inp.value;
+  const exact = findExact(inp.value);
+  importRows[i].fuzzy = false;
+  inp.className = exact ? 'ok' : 'warn';
+};
+window.impToggleAll = function(v){ importRows.forEach((r,i)=>{ r.checked=v; const c=$('impC_'+i); if(c) c.checked=v; }); };
+
+window.doImport = async function(){
+  const rows = importRows.filter(r => r.checked && r.target && findExact(r.target) && r.qty > 0);
+  if(!rows.length){ showMsg('impErr','Tidak ada baris valid yang dicentang.', 5000); return; }
+  const btn = $('impGoBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
+  try {
+    // Kelompokkan per barang → satu update per barang
+    const byItem = {};
+    rows.forEach(r => {
+      const it = findExact(r.target);
+      if(!byItem[it.id]) byItem[it.id] = { it, add: [] };
+      byItem[it.id].add.push({ jenis:r.jenis, tanggal:r.tanggal, qty:r.qty, sat:r.sat, pihak:r.pihak, noNota:r.noNota, ref:r.ref });
+    });
+    for(const id of Object.keys(byItem)){
+      const { it, add } = byItem[id];
+      await updateDoc(doc(db, COLL, id), { mutasi: [...(it.mutasi||[]), ...add] });
+    }
+    showMsg('impOk', `✔ ${rows.length} mutasi disimpan ke ${Object.keys(byItem).length} barang.`, 6000);
+    $('impTsv').value='';
+    setTimeout(()=>{ $('impPreview').innerHTML=''; importRows=[]; }, 2500);
+  } catch(e){
+    showMsg('impErr','Gagal menyimpan: '+e.message, 7000);
+    btn.disabled = false; btn.textContent = '💾 Coba lagi';
+  }
+};
+
+// ===================== HITUNG FISIK =====================
+window.toggleFisBelum = function(){ fisBelumOn = !fisBelumOn; $('fisBelum').classList.toggle('active', fisBelumOn); renderFisik(); };
+
+window.renderFisik = function(){
+  let list = filteredItems('fisCari','fisKat', false);
+  if(fisBelumOn) list = list.filter(it => !it.fisik);
+  const tbody = $('fisikBody');
+  if(!list.length){ tbody.innerHTML = `<tr><td colspan="7" class="empty">${items.length?'Tidak ada yang cocok dengan filter.':'Belum ada barang.'}</td></tr>`; return; }
+  tbody.innerHTML = list.map(it => {
+    const teo = teoritisOf(it);
+    const isi = parseFloat(it.isiDrum)||0;
+    const draft = fisikDraft[it.id];
+    const drum = draft ? draft.drum : (it.fisik ? it.fisik.drum : '');
+    const ecer = draft ? draft.eceran : (it.fisik ? it.fisik.eceran : '');
+    const kg = (parseId(drum)*isi) + parseId(ecer);
+    const has = String(drum).trim()!=='' || String(ecer).trim()!=='';
+    const s = has ? Math.round((kg - teo)*100)/100 : null;
+    const changed = !!draft;
+    return `<tr>
+      <td class="nama-cell">${esc(it.nama)}<span class="kat">${esc(it.kat||'')} · ${esc(it.sat||'kg')}${isi>0?' · 1 drum = '+num(isi):''}</span></td>
+      <td class="r" style="font-weight:600">${num(teo)}${isi>0?`<span class="drum-note">${drumStr(teo,isi)}</span>`:''}</td>
+      <td class="r">${isi>0?`<input class="fis-inp${changed?' changed':''}" inputmode="decimal" value="${drum}" oninput="fisChange('${it.id}','drum',this.value)" placeholder="0">`:'<span class="zero">-</span>'}</td>
+      <td class="r"><input class="fis-inp${changed?' changed':''}" style="width:80px" inputmode="decimal" value="${ecer}" oninput="fisChange('${it.id}','eceran',this.value)" placeholder="0"></td>
+      <td class="r fis-kg" id="fisKg_${it.id}">${has?num(kg):'-'}</td>
+      <td class="r" id="fisSel_${it.id}">${s===null?'<span class="zero">-</span>':`<span class="${s<0?'neg':s>0?'pos':'zero'}">${s>0?'+':''}${num(s)}</span>`}</td>
+      <td>
+        <button class="icon-btn" id="fisSave_${it.id}" onclick="fisSave('${it.id}')" ${changed?'':'disabled style="opacity:.35"'}>💾 Simpan</button>
+      </td>
+    </tr>`;
+  }).join('');
+};
+
+window.fisChange = function(id, f, v){
+  const it = items.find(x=>x.id===id); if(!it) return;
+  if(!fisikDraft[id]) fisikDraft[id] = {
+    drum: it.fisik ? it.fisik.drum : '',
+    eceran: it.fisik ? it.fisik.eceran : ''
+  };
+  fisikDraft[id][f] = v;
+  // update kg & selisih & tombol tanpa render ulang (kursor tetap)
+  const isi = parseFloat(it.isiDrum)||0;
+  const kg = parseId(fisikDraft[id].drum)*isi + parseId(fisikDraft[id].eceran);
+  const teo = teoritisOf(it);
+  const s = Math.round((kg - teo)*100)/100;
+  const kgEl = $('fisKg_'+id); if(kgEl) kgEl.textContent = num(kg);
+  const selEl = $('fisSel_'+id); if(selEl) selEl.innerHTML = `<span class="${s<0?'neg':s>0?'pos':'zero'}">${s>0?'+':''}${num(s)}</span>`;
+  const btn = $('fisSave_'+id); if(btn){ btn.disabled=false; btn.removeAttribute('style'); }
+};
+
+window.fisSave = async function(id){
+  const it = items.find(x=>x.id===id); if(!it || !fisikDraft[id]) return;
+  const d = fisikDraft[id];
+  const fisik = {
+    drum: parseId(d.drum), eceran: parseId(d.eceran),
+    tanggal: new Date().toISOString().slice(0,10)
+  };
+  const btn = $('fisSave_'+id); if(btn){ btn.disabled=true; btn.textContent='...'; }
+  try {
+    await updateDoc(doc(db, COLL, id), { fisik });
+    delete fisikDraft[id];
+  } catch(e){ alert('Gagal: '+e.message); }
+};
+
+window.kunciOpname = async function(){
+  const dihitung = items.filter(it=>it.fisik);
+  if(!dihitung.length){ alert('Belum ada barang yang dihitung fisik.'); return; }
+  const belum = items.length - dihitung.length;
+  const msg = `Kunci opname & mulai periode baru?\n\n` +
+    `• ${dihitung.length} barang yang SUDAH dihitung → stok awal baru = hasil fisik\n` +
+    (belum ? `• ${belum} barang yang BELUM dihitung → stok awal baru = stok teoritis\n` : '') +
+    `• Semua riwayat mutasi & hitungan fisik direset ke 0\n\nTindakan ini tidak bisa dibatalkan.`;
+  if(!confirm(msg)) return;
+  if(!confirm('Yakin? Ketik OK sekali lagi untuk melanjutkan.')) return;
+  try {
+    let batch = writeBatch(db), n = 0;
+    for(const it of items){
+      const f = fisikKgOf(it);
+      const newAwal = f !== null ? f : teoritisOf(it);
+      batch.update(doc(db, COLL, it.id), { stokAwal: Math.round(newAwal*100)/100, mutasi: [], fisik: null });
+      n++;
+      if(n % 400 === 0){ await batch.commit(); batch = writeBatch(db); }
+    }
+    await batch.commit();
+    fisikDraft = {};
+    alert('✔ Opname dikunci. Periode baru dimulai dengan stok awal dari hasil hitung.');
+  } catch(e){ alert('Gagal: '+e.message); }
+};
+
+// ===================== COPY STOK TSV =====================
+window.copyStok = function(){
+  const list = filteredItems('fltCari','fltKat', fltMinusOn);
+  if(!list.length){ alert('Tidak ada data untuk dicopy.'); return; }
+  const header = ['Nama','Kategori','Sat','Isi/Drum','Stok Awal','Masuk','Keluar','Teoritis','Teoritis (drum)','Fisik','Selisih','Status'].join('\t');
+  const rows = list.map(it => {
+    const teo = teoritisOf(it), fis = fisikKgOf(it), s = selisihOf(it);
+    const isi = parseFloat(it.isiDrum)||0;
+    const st = s===null ? 'BELUM' : Math.abs(s)<=0.01 ? 'COCOK' : 'SELISIH';
+    const fmtN = v => String(Math.round(v*100)/100).replace('.',',');
+    return [it.nama, it.kat||'', it.sat||'kg', isi||'', fmtN(it.stokAwal||0),
+      fmtN(sumMut(it,'masuk')), fmtN(sumMut(it,'keluar')), fmtN(teo),
+      isi>0?drumStr(teo,isi):'', fis===null?'':fmtN(fis), s===null?'':fmtN(s), st].join('\t');
+  });
+  const tsv = header + '\n' + rows.join('\n');
+  navigator.clipboard.writeText(tsv).then(()=>showMsg('stokOk','✔ Berhasil dicopy! Langsung paste (Ctrl+V) di Google Sheet.'))
+  .catch(()=>{
+    const ta = document.createElement('textarea');
+    ta.value = tsv; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    showMsg('stokOk','✔ Berhasil dicopy!');
+  });
+};
+
+document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ window.closeHist(); window.closeEdit(); } });
+
+// ===================== INIT =====================
+setTab('dash');
+</script>
+
+</body>
+</html>
