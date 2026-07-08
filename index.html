@@ -274,7 +274,6 @@ tr:hover td{background:#fafafe}
       <button class="btn btn-line btn-sm" onclick="toggleHargaImp()" id="hImpToggle">💰 Import harga</button>
       <button class="btn btn-line btn-sm" onclick="toggleMasterImp()" id="mImpToggle">📥 Import master (paste)</button>
       <button class="btn btn-t btn-sm" onclick="openEdit(null)">➕ Tambah barang</button>
-      <button class="btn btn-line btn-sm" onclick="copyHargaTemplate()">📋 Template harga</button>
       <button class="btn btn-line btn-sm" onclick="copyStok()">📋 Copy ke Google Sheet</button>
     </div>
     <div id="hImpBody" style="display:none;border:1px dashed #d6eceb;border-radius:9px;padding:10px 12px;margin-bottom:10px;background:#f7fbfb">
@@ -303,6 +302,8 @@ tr:hover td{background:#fafafe}
       <input type="text" id="fltCari" placeholder="Cari nama barang..." oninput="renderStok()">
       <select id="fltKat" onchange="renderStok()"><option value="">Semua kategori</option></select>
       <button class="flt-btn" id="fltMinus" onclick="toggleFltMinus()">🔻 Hanya minus</button>
+      <button class="flt-btn" id="fltTerjual" onclick="toggleFltTerjual()">💵 Pernah terjual</button>
+      <button class="flt-btn" id="fltBelumTerjual" onclick="toggleFltBelumTerjual()">Belum terjual</button>
     </div>
 
     <!-- NORMAL VIEW -->
@@ -359,6 +360,7 @@ tr:hover td{background:#fafafe}
     <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-line" onclick="parseJual()">🔍 Baca penjualan</button>
       <button class="btn btn-line" onclick="resetJualImport()">Reset</button>
+      <button class="btn btn-r" onclick="undoLastSaleImport()" id="undoSaleBtn" style="display:none">↩ Batalkan import terakhir</button>
       <span class="hint" style="margin:0">Bisa disimpan sebagai laporan saja, atau sekaligus mengurangi stok.</span>
     </div>
     <div class="err-msg" id="jualErr"></div>
@@ -503,6 +505,30 @@ tr:hover td{background:#fafafe}
 
 </div><!-- /app -->
 </div><!-- /main -->
+
+<!-- ============ MODAL EDIT PENJUALAN ============ -->
+<div class="modal" id="saleModal">
+  <div class="modal-box wide" onclick="event.stopPropagation()">
+    <h3>Edit Penjualan</h3>
+    <div class="sub" id="saleEditSub"></div>
+    <div class="e-grid">
+      <div class="field"><label>Tanggal</label><input type="date" id="seTanggal"></div>
+      <div class="field"><label>Pelanggan</label><input type="text" id="sePelanggan"></div>
+      <div class="field"><label>Kota</label><input type="text" id="seKota"></div>
+      <div class="field"><label>No nota</label><input type="text" id="seNota"></div>
+      <div class="field"><label>Barang stok</label><input type="text" id="seBarang" list="itemList"></div>
+      <div class="field"><label>Satuan</label><input type="text" id="seSat"></div>
+      <div class="field"><label>Qty</label><input type="text" inputmode="decimal" id="seQty"></div>
+      <div class="field"><label>Harga jual</label><input type="text" inputmode="numeric" id="seHarga" oninput="this.value=grpRibuG(this.value)"></div>
+    </div>
+    <div class="mut-sum" id="saleEditCalc"></div>
+    <div class="err-msg" id="saleEditErr"></div>
+    <div class="modal-close-row">
+      <button class="btn btn-line" onclick="closeSaleEdit()">Batal</button>
+      <button class="btn btn-t" onclick="saveSaleEdit()" id="saleEditSaveBtn">💾 Simpan</button>
+    </div>
+  </div>
+</div>
 
 <!-- ============ MODAL EDIT BARANG ============ -->
 <div class="modal" id="editModal">
@@ -702,10 +728,11 @@ let auth=null, db=null, unsub=null, unsubSales=null;
 let items = [];
 let sales = [];
 let curTab = 'dash';
-let fltMinusOn = false, fisBelumOn = false;
-let editDocId = null, histDocId = null;
+let fltMinusOn = false, fisBelumOn = false, fltTerjualOn = false, fltBelumTerjualOn = false;
+let editDocId = null, histDocId = null, saleEditId = null;
 let importRows = [];
 let jualRows = [];
+let lastSaleImport = null;
 let importJenis = 'keluar';         // pilihan manual masuk/keluar
 let fisikDraft = {};
 let stokEditMode = false;
@@ -719,6 +746,7 @@ const fisikKgOf = it => it.fisik ? (parseFloat(it.fisik.drum)||0)*(parseFloat(it
 const selisihOf = it => { const f = fisikKgOf(it); return f===null ? null : Math.round((f - teoritisOf(it))*100)/100; };
 const hargaOf = it => parseFloat(it.harga)||0;
 const nilaiOf = it => teoritisOf(it) * hargaOf(it);
+const soldItemIds = () => new Set(sales.map(s=>s.itemId).filter(Boolean));
 
 // ===================== FIREBASE INIT =====================
 const fbApp = initializeApp(firebaseConfig);
@@ -1008,6 +1036,20 @@ function renderDash(){
 
 // ===================== TAB STOK =====================
 window.toggleFltMinus = function(){ fltMinusOn = !fltMinusOn; $('fltMinus').classList.toggle('active', fltMinusOn); renderStok(); };
+window.toggleFltTerjual = function(){
+  fltTerjualOn = !fltTerjualOn;
+  if(fltTerjualOn) fltBelumTerjualOn = false;
+  $('fltTerjual').classList.toggle('active', fltTerjualOn);
+  $('fltBelumTerjual').classList.toggle('active', fltBelumTerjualOn);
+  renderStok();
+};
+window.toggleFltBelumTerjual = function(){
+  fltBelumTerjualOn = !fltBelumTerjualOn;
+  if(fltBelumTerjualOn) fltTerjualOn = false;
+  $('fltTerjual').classList.toggle('active', fltTerjualOn);
+  $('fltBelumTerjual').classList.toggle('active', fltBelumTerjualOn);
+  renderStok();
+};
 
 function filteredItems(cariId, katId, minusOnly){
   const cari = $(cariId).value.trim().toLowerCase();
@@ -1016,6 +1058,11 @@ function filteredItems(cariId, katId, minusOnly){
   if(cari) list = list.filter(it => it.nama.toLowerCase().includes(cari));
   if(kat) list = list.filter(it => it.kat === kat);
   if(minusOnly) list = list.filter(it => teoritisOf(it) < -0.01);
+  if(cariId==='fltCari'){
+    const sold = soldItemIds();
+    if(fltTerjualOn) list = list.filter(it => sold.has(it.id));
+    if(fltBelumTerjualOn) list = list.filter(it => !sold.has(it.id));
+  }
   return list;
 }
 
@@ -1277,20 +1324,6 @@ window.importHargaGo = async function(){
     showMsg('hImpErr','Gagal update harga: '+e.message, 8000);
     btn.disabled = false; btn.textContent = '💾 Coba lagi';
   }
-};
-
-window.copyHargaTemplate = function(){
-  if(!items.length){ alert('Belum ada barang.'); return; }
-  const rows = items.map(it => [it.nama, hargaOf(it) ? rp(hargaOf(it)) : ''].join('\t'));
-  const tsv = 'Nama Barang\tHarga (Rp)\n' + rows.join('\n');
-  navigator.clipboard.writeText(tsv).then(()=>showMsg('stokOk','✔ Template harga berhasil dicopy. Paste ke Google Sheet, isi harga, lalu import lagi.'))
-  .catch(()=>{
-    const ta = document.createElement('textarea');
-    ta.value = tsv; ta.style.position='fixed'; ta.style.opacity='0';
-    document.body.appendChild(ta); ta.select();
-    document.execCommand('copy'); document.body.removeChild(ta);
-    showMsg('stokOk','✔ Template harga berhasil dicopy.');
-  });
 };
 
 // ===================== IMPORT MASTER =====================
@@ -1599,9 +1632,12 @@ window.doJualImport = async function(kurangiStok){
       });
     }
     let batch = writeBatch(db), n = 0;
+    const saleDocs = [];
     for(const r of rows){
       const it = findExact(r.target);
-      batch.set(doc(collection(db, SALES_COLL)), {
+      const saleRef = doc(collection(db, SALES_COLL));
+      saleDocs.push({ id:saleRef.id, ref:r.ref, itemId:it.id, stockDeducted:!!kurangiStok });
+      batch.set(saleRef, {
         tanggal:r.tanggal, pelanggan:r.pelanggan, kota:r.kota, noNota:r.noNota,
         itemId:it.id, namaBarang:it.nama, namaNota:r.namaRaw,
         qty:r.qty, sat:r.sat, harga:r.harga, subtotal:r.subtotal,
@@ -1620,6 +1656,8 @@ window.doJualImport = async function(kurangiStok){
     }
     await batch.commit();
     const total = rows.reduce((s,r)=>s+r.subtotal,0);
+    lastSaleImport = { saleDocs, stockDeducted:!!kurangiStok, at:new Date().toISOString() };
+    $('undoSaleBtn').style.display = 'inline-block';
     await auditLog(kurangiStok ? 'import_penjualan_stok' : 'import_penjualan_saja', { jumlah: rows.length, total, barang: Object.keys(byItem).length });
     showMsg('jualOk', `✔ ${rows.length} baris penjualan disimpan. Total ${rp(total)}.${kurangiStok?' Stok sudah dikurangi.':' Stok tidak diubah.'}`, 8000);
     $('jualTsv').value='';
@@ -1628,6 +1666,42 @@ window.doJualImport = async function(kurangiStok){
     showMsg('jualErr','Gagal menyimpan penjualan: '+e.message, 8000);
     if(btnOnly){ btnOnly.disabled = false; btnOnly.textContent = '💾 Simpan penjualan saja'; }
     if(btnStock){ btnStock.disabled = false; btnStock.textContent = '💾 Simpan & kurangi stok'; }
+  }
+};
+
+window.undoLastSaleImport = async function(){
+  if(!lastSaleImport || !lastSaleImport.saleDocs || !lastSaleImport.saleDocs.length){
+    alert('Belum ada import penjualan terakhir untuk dibatalkan.');
+    return;
+  }
+  const n = lastSaleImport.saleDocs.length;
+  const msg = `Batalkan import penjualan terakhir (${n} baris)?\n\n` +
+    (lastSaleImport.stockDeducted ? 'Data laporan akan dihapus dan mutasi stok keluar terkait ikut dihapus.' : 'Data laporan akan dihapus. Stok tidak berubah.');
+  if(!confirm(msg)) return;
+  try {
+    let batch = writeBatch(db), ops = 0;
+    lastSaleImport.saleDocs.forEach(s => { batch.delete(doc(db, SALES_COLL, s.id)); ops++; });
+    if(lastSaleImport.stockDeducted){
+      const refsByItem = {};
+      lastSaleImport.saleDocs.forEach(s => {
+        if(!refsByItem[s.itemId]) refsByItem[s.itemId] = new Set();
+        refsByItem[s.itemId].add(s.ref);
+      });
+      for(const itemId of Object.keys(refsByItem)){
+        const it = items.find(x=>x.id===itemId); if(!it) continue;
+        const refs = refsByItem[itemId];
+        const mutasi = (it.mutasi||[]).filter(m => !refs.has(m.ref));
+        batch.update(doc(db, COLL, itemId), { mutasi });
+        ops++;
+      }
+    }
+    await batch.commit();
+    await auditLog('undo_import_penjualan', { jumlah:n, stockDeducted:lastSaleImport.stockDeducted });
+    lastSaleImport = null;
+    $('undoSaleBtn').style.display = 'none';
+    showMsg('jualErr','Import penjualan terakhir sudah dibatalkan.', 7000);
+  } catch(e){
+    showMsg('jualErr','Gagal membatalkan import: '+e.message, 8000);
   }
 };
 
@@ -1739,30 +1813,62 @@ async function syncSaleMutation(batch, oldSale, newSale){
   }
 }
 
-window.editSale = async function(id){
+window.editSale = function(id){
   const s = sales.find(x=>x.id===id); if(!s) return;
-  const tanggalIn = prompt('Tanggal penjualan:', isoToDisp(s.tanggal));
-  if(tanggalIn === null) return;
-  const pd = parseImportDate(tanggalIn);
-  if(!pd.ok){ alert('Tanggal tidak valid.'); return; }
-  const pelanggan = prompt('Pelanggan:', s.pelanggan||''); if(pelanggan === null) return;
-  const kota = prompt('Kota:', s.kota||''); if(kota === null) return;
-  const noNota = prompt('No nota:', s.noNota||''); if(noNota === null) return;
-  const barang = prompt('Barang stok:', s.namaBarang||s.namaNota||''); if(barang === null) return;
-  const it = findExact(barang);
-  if(!it){ alert(`Barang "${barang}" tidak ada di daftar stok. Pilih nama persis dari master barang.`); return; }
-  const qty = parseId(prompt('Qty:', String(s.qty||'').replace('.',',')));
-  if(qty <= 0){ alert('Qty harus lebih dari 0.'); return; }
-  const sat = prompt('Satuan:', s.sat||'kg'); if(sat === null) return;
-  const harga = parseHargaValue(prompt('Harga jual:', s.harga ? String(s.harga) : ''));
-  if(harga <= 0){ alert('Harga harus lebih dari 0.'); return; }
+  saleEditId = id;
+  $('saleEditErr').style.display='none';
+  $('saleEditSub').textContent = s.stockDeducted ? 'Penjualan ini sudah mengurangi stok. Jika qty/barang/tanggal diubah, mutasi stok ikut diperbarui.' : 'Penjualan ini tidak mengurangi stok.';
+  $('seTanggal').value = s.tanggal || todayIso();
+  $('sePelanggan').value = s.pelanggan || '';
+  $('seKota').value = s.kota || '';
+  $('seNota').value = s.noNota || '';
+  $('seBarang').value = s.namaBarang || s.namaNota || '';
+  $('seSat').value = s.sat || 'kg';
+  $('seQty').value = String(s.qty||'').replace('.',',');
+  $('seHarga').value = s.harga ? grpRibu(s.harga) : '';
+  updateSaleEditCalc();
+  $('saleModal').classList.add('show');
+};
+
+window.closeSaleEdit = function(){
+  saleEditId = null;
+  $('saleModal').classList.remove('show');
+};
+
+window.updateSaleEditCalc = function(){
+  if(!$('saleEditCalc')) return;
+  const it = findExact($('seBarang').value);
+  const qty = parseId($('seQty').value);
+  const harga = parseHargaValue($('seHarga').value);
+  const subtotal = Math.round(qty * harga);
+  const master = it ? hargaOf(it) : 0;
+  const diff = master ? harga - master : 0;
+  $('saleEditCalc').innerHTML = `<span>Subtotal: <b>${rp(subtotal)}</b></span>
+    <span>Harga master: <b>${master?rp(master):'-'}</b></span>
+    <span>Selisih: <b class="${diff<0?'neg':diff>0?'pos':''}">${master?(diff>0?'+':'')+rp(diff):'-'}</b></span>`;
+};
+
+['seBarang','seQty','seHarga'].forEach(id => setTimeout(()=>{ const el=$(id); if(el) el.addEventListener('input', updateSaleEditCalc); },0));
+
+window.saveSaleEdit = async function(){
+  const s = sales.find(x=>x.id===saleEditId); if(!s) return;
+  $('saleEditErr').style.display='none';
+  const pd = parseImportDate($('seTanggal').value);
+  if(!pd.ok){ showMsg('saleEditErr','Tanggal tidak valid.', 6000); return; }
+  const it = findExact($('seBarang').value);
+  if(!it){ showMsg('saleEditErr','Barang stok tidak ditemukan. Pilih nama persis dari master barang.', 7000); return; }
+  const qty = parseId($('seQty').value);
+  if(qty <= 0){ showMsg('saleEditErr','Qty harus lebih dari 0.', 6000); return; }
+  const harga = parseHargaValue($('seHarga').value);
+  if(harga <= 0){ showMsg('saleEditErr','Harga harus lebih dari 0.', 6000); return; }
   const subtotal = Math.round(qty * harga);
   const hargaMaster = hargaOf(it);
   const updated = {
-    ...s, tanggal:pd.iso, pelanggan:pelanggan.trim(), kota:kota.trim(), noNota:noNota.trim(),
-    itemId:it.id, namaBarang:it.nama, qty, sat:(sat.trim()||'kg'), harga, subtotal,
+    ...s, tanggal:pd.iso, pelanggan:$('sePelanggan').value.trim(), kota:$('seKota').value.trim(), noNota:$('seNota').value.trim(),
+    itemId:it.id, namaBarang:it.nama, qty, sat:($('seSat').value.trim()||'kg'), harga, subtotal,
     hargaMaster, selisihHarga:hargaMaster ? harga - hargaMaster : 0
   };
+  const btn = $('saleEditSaveBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
   try {
     const batch = writeBatch(db);
     batch.update(doc(db, SALES_COLL, id), {
@@ -1773,9 +1879,11 @@ window.editSale = async function(id){
     });
     await syncSaleMutation(batch, s, updated);
     await batch.commit();
-    await auditLog('penjualan_edit', { id, pelanggan:updated.pelanggan, barang:updated.namaBarang, subtotal:updated.subtotal, stockDeducted:!!updated.stockDeducted });
+    await auditLog('penjualan_edit', { id:saleEditId, pelanggan:updated.pelanggan, barang:updated.namaBarang, subtotal:updated.subtotal, stockDeducted:!!updated.stockDeducted });
+    closeSaleEdit();
     showMsg('lapJualOk','✔ Penjualan berhasil diperbarui.', 5000);
-  } catch(e){ alert('Gagal edit penjualan: '+e.message); }
+  } catch(e){ showMsg('saleEditErr','Gagal edit penjualan: '+e.message, 8000); }
+  btn.disabled = false; btn.textContent = '💾 Simpan';
 };
 
 window.deleteSale = async function(id){
