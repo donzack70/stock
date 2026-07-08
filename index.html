@@ -79,6 +79,13 @@ tr:hover td{background:#fafafe}
 .filter-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 .filter-row input[type=text]{flex:1;min-width:160px;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;background:#fafafa}
 .filter-row select{padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;background:#fafafa}
+.filter-row input[type=date]{padding:6px 9px;border:1px solid #ddd;border-radius:8px;font-size:13px;background:#fafafa;font-family:inherit}
+.pager{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-top:10px;flex-wrap:wrap}
+.pager .pinfo{font-size:12px;color:#888}
+.pager button{padding:6px 12px;border:1px solid #ddd;border-radius:8px;background:#fff;color:#555;font-size:12px;font-weight:600;cursor:pointer}
+.pager button:disabled{opacity:.4;cursor:not-allowed}
+.mut-sum{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#666;background:#fafafa;border:1px solid #eee;border-radius:8px;padding:7px 12px;margin-bottom:10px}
+.mut-sum b{color:#1a1a1a}
 .flt-btn{padding:6px 13px;border:1px solid #ddd;border-radius:20px;background:#fafafa;color:#777;font-size:12px;font-weight:600;cursor:pointer}
 .flt-btn.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
 /* SEGMENTED (pilih jenis import) */
@@ -325,14 +332,31 @@ tr:hover td{background:#fafafe}
       <span class="hint" style="margin:0">Perbaiki qty / tanggal / jenis / barang yang salah tanpa buka satu-satu.</span>
     </div>
     <div class="filter-row">
-      <input type="text" id="mutCari" placeholder="Cari barang / pihak / no nota..." oninput="renderMutasi()">
-      <select id="mutJenis" onchange="renderMutasi()">
+      <input type="text" id="mutCari" placeholder="Cari barang / pihak / no nota..." oninput="mutFilterChanged()">
+      <select id="mutJenis" onchange="mutFilterChanged()">
         <option value="">Semua jenis</option>
         <option value="masuk">Hanya masuk</option>
         <option value="keluar">Hanya keluar</option>
       </select>
     </div>
-    <div class="hint" style="margin:0 0 8px">Ubah nilainya lalu klik 💾 di baris itu. Kalau <b>Barang</b> diganti ke barang lain, mutasi otomatis dipindah ke barang tersebut. Klik ✕ untuk hapus.</div>
+    <div class="filter-row">
+      <label style="font-size:12px;color:#888;font-weight:600">📅 Tanggal:</label>
+      <input type="date" id="mutDari" onchange="mutFilterChanged()" title="Dari tanggal">
+      <span style="color:#aaa;font-size:12px">s/d</span>
+      <input type="date" id="mutSampai" onchange="mutFilterChanged()" title="Sampai tanggal">
+      <button class="flt-btn" onclick="mutHariIni()">Hari ini</button>
+      <button class="flt-btn" onclick="mutResetDate()">Reset tanggal</button>
+      <span style="flex:1"></span>
+      <label style="font-size:12px;color:#888">Tampil:</label>
+      <select id="mutPageSize" onchange="mutFilterChanged()">
+        <option value="25">25 baris</option>
+        <option value="50" selected>50 baris</option>
+        <option value="100">100 baris</option>
+        <option value="99999">Semua</option>
+      </select>
+    </div>
+    <div class="hint" style="margin:0 0 8px">Isi <b>Dari</b> saja = dari tanggal itu ke depan · isi <b>Sampai</b> saja = sampai tanggal itu · isi keduanya = rentang · klik "Hari ini" untuk satu hari. Ubah nilai lalu klik 💾 di baris itu; ganti kolom <b>Barang</b> untuk memindah mutasi. Klik ✕ untuk hapus.</div>
+    <div class="mut-sum" id="mutSum"></div>
     <div class="tbl-wrap"><table>
       <thead><tr>
         <th style="width:70px">Jenis</th>
@@ -345,6 +369,7 @@ tr:hover td{background:#fafafe}
       </tr></thead>
       <tbody id="mutBody"></tbody>
     </table></div>
+    <div class="pager" id="mutPager"></div>
   </div>
 </div>
 
@@ -471,6 +496,7 @@ let fisikDraft = {};
 let stokEditMode = false;
 let stokDraft = {};                 // {docId: {nama,kat,sat,isiDrum,stokAwal,harga}}
 let mutDraft = {};                  // {itemId#idx: {jenis,tanggal,qty,pihak,noNota,barang}}
+let mutPage = 1;                    // halaman aktif tab Semua Mutasi
 
 const sumMut = (it, jenis) => (it.mutasi||[]).filter(m=>m.jenis===jenis).reduce((s,m)=>s+(parseFloat(m.qty)||0),0);
 const teoritisOf = it => (parseFloat(it.stokAwal)||0) + sumMut(it,'masuk') - sumMut(it,'keluar');
@@ -1141,18 +1167,51 @@ function allMutasi(){
   return arr;
 }
 
+window.mutFilterChanged = function(){ mutPage = 1; renderMutasi(); };
+window.mutResetDate = function(){ $('mutDari').value=''; $('mutSampai').value=''; mutPage=1; renderMutasi(); };
+window.mutHariIni = function(){ const t = new Date().toISOString().slice(0,10); $('mutDari').value=t; $('mutSampai').value=t; mutPage=1; renderMutasi(); };
+window.mutGoPage = function(p){ mutPage = p; renderMutasi(); };
+
 window.renderMutasi = function(){
   const cari = $('mutCari').value.trim().toLowerCase();
   const fj = $('mutJenis').value;
+  const dari = $('mutDari').value;      // '' atau 'yyyy-mm-dd'
+  const sampai = $('mutSampai').value;
   let list = allMutasi();
   if(fj) list = list.filter(m => m.jenis === fj);
+  if(dari) list = list.filter(m => String(m.tanggal) >= dari);
+  if(sampai) list = list.filter(m => String(m.tanggal) <= sampai);
   if(cari) list = list.filter(m =>
     m.itemNama.toLowerCase().includes(cari) ||
     String(m.pihak||'').toLowerCase().includes(cari) ||
     String(m.noNota||'').toLowerCase().includes(cari));
+
+  // ringkasan hasil filter
+  const total = list.length;
+  const sumMasuk = list.filter(m=>m.jenis==='masuk').reduce((s,m)=>s+(parseFloat(m.qty)||0),0);
+  const sumKeluar = list.filter(m=>m.jenis==='keluar').reduce((s,m)=>s+(parseFloat(m.qty)||0),0);
+  const rentang = (dari||sampai) ? `${dari?isoToDisp(dari):'awal'} — ${sampai?isoToDisp(sampai):'terakhir'}` : 'semua tanggal';
+  $('mutSum').innerHTML = `<span>Rentang: <b>${rentang}</b></span>
+    <span>Baris: <b>${total}</b></span>
+    <span style="color:#1e7a45">Total masuk: <b>${num(sumMasuk)}</b></span>
+    <span style="color:#b7600a">Total keluar: <b>${num(sumKeluar)}</b></span>`;
+
   const tbody = $('mutBody');
-  if(!list.length){ tbody.innerHTML = `<tr><td colspan="7" class="empty">${items.some(it=>(it.mutasi||[]).length)?'Tidak ada mutasi yang cocok dengan filter.':'Belum ada mutasi. Import dulu di tab 📋 Import Mutasi.'}</td></tr>`; return; }
-  tbody.innerHTML = list.map(m => {
+  if(!total){
+    tbody.innerHTML = `<tr><td colspan="7" class="empty">${items.some(it=>(it.mutasi||[]).length)?'Tidak ada mutasi yang cocok dengan filter.':'Belum ada mutasi. Import dulu di tab 📋 Import Mutasi.'}</td></tr>`;
+    $('mutPager').innerHTML='';
+    return;
+  }
+
+  // pagination
+  const pageSize = parseInt($('mutPageSize').value) || 50;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if(mutPage > totalPages) mutPage = totalPages;
+  if(mutPage < 1) mutPage = 1;
+  const start = (mutPage-1)*pageSize;
+  const pageList = list.slice(start, start + pageSize);
+
+  tbody.innerHTML = pageList.map(m => {
     const key = m.itemId+'#'+m.idx;
     const d = mutDraft[key];
     const jenis = d ? d.jenis : m.jenis;
@@ -1178,6 +1237,22 @@ window.renderMutasi = function(){
       </td>
     </tr>`;
   }).join('');
+
+  // pager controls
+  if(totalPages <= 1){
+    $('mutPager').innerHTML = `<span class="pinfo">Menampilkan semua ${total} baris.</span>`;
+  } else {
+    const from = start + 1, to = Math.min(start + pageSize, total);
+    $('mutPager').innerHTML = `
+      <span class="pinfo">Menampilkan <b>${from}–${to}</b> dari <b>${total}</b> baris</span>
+      <span style="display:flex;gap:6px;align-items:center">
+        <button onclick="mutGoPage(1)" ${mutPage===1?'disabled':''}>« Awal</button>
+        <button onclick="mutGoPage(${mutPage-1})" ${mutPage===1?'disabled':''}>‹ Sebelumnya</button>
+        <span class="pinfo">Hal. ${mutPage} / ${totalPages}</span>
+        <button onclick="mutGoPage(${mutPage+1})" ${mutPage===totalPages?'disabled':''}>Berikutnya ›</button>
+        <button onclick="mutGoPage(${totalPages})" ${mutPage===totalPages?'disabled':''}>Akhir »</button>
+      </span>`;
+  }
 };
 
 window.mutChange = function(key, field, val){
