@@ -176,6 +176,7 @@ tr:hover td{background:#fafafe}
   <button class="tab-btn act" id="tb_dash" onclick="setTab('dash')">📊 Dashboard</button>
   <button class="tab-btn" id="tb_stok" onclick="setTab('stok')">📦 Stok</button>
   <button class="tab-btn" id="tb_jual" onclick="setTab('jual')">💵 Penjualan</button>
+  <button class="tab-btn" id="tb_lapjual" onclick="setTab('lapjual')">📈 Laporan Jual</button>
   <button class="tab-btn" id="tb_imp" onclick="setTab('imp')">📋 Import Mutasi</button>
   <button class="tab-btn" id="tb_mutasi" onclick="setTab('mutasi')">🧾 Semua Mutasi</button>
   <button class="tab-btn" id="tb_fisik" onclick="setTab('fisik')">✏️ Hitung Fisik</button>
@@ -324,10 +325,50 @@ tr:hover td{background:#fafafe}
     <div class="field"><textarea id="jualTsv" class="mono" placeholder="Tanggal	Pelanggan	Kota	No.Nota	Nama Barang	Qty	Sat	Harga	Subtotal	Harga Master	Status&#10;07/07/2026	RAHMAN	PAMEKASAN		GARAM MERAH	25	kg	102500	2562500	105000	PIUTANG"></textarea></div>
     <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-line" onclick="parseJual()">🔍 Baca penjualan</button>
-      <span class="hint" style="margin:0">Saat disimpan, penjualan masuk laporan dan stok otomatis berkurang.</span>
+      <button class="btn btn-line" onclick="resetJualImport()">Reset</button>
+      <span class="hint" style="margin:0">Bisa disimpan sebagai laporan saja, atau sekaligus mengurangi stok.</span>
     </div>
     <div class="err-msg" id="jualErr"></div>
     <div id="jualPreview" style="margin-top:10px"></div>
+  </div>
+</div>
+
+<!-- ====== LAPORAN PENJUALAN ====== -->
+<div id="tab_lapjual" style="display:none">
+  <div class="card">
+    <div class="card-title">📈 Laporan Penjualan
+      <span class="spacer"></span>
+      <button class="btn btn-line btn-sm" onclick="copyLaporanJual()">📋 Copy hasil filter</button>
+    </div>
+    <div class="filter-row">
+      <input type="text" id="lapJualCari" placeholder="Cari pelanggan / kota / barang / no nota..." oninput="renderLaporanJual()">
+      <select id="lapJualStatus" onchange="renderLaporanJual()">
+        <option value="">Semua status</option>
+      </select>
+    </div>
+    <div class="filter-row">
+      <label style="font-size:12px;color:#888;font-weight:600">📅 Tanggal:</label>
+      <input type="date" id="lapJualDari" onchange="renderLaporanJual()" title="Dari tanggal">
+      <span style="color:#aaa;font-size:12px">s/d</span>
+      <input type="date" id="lapJualSampai" onchange="renderLaporanJual()" title="Sampai tanggal">
+      <button class="flt-btn" onclick="lapJualResetDate()">Reset tanggal</button>
+    </div>
+    <div class="mut-sum" id="lapJualSum"></div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        <th style="width:78px">Tanggal</th>
+        <th>Pelanggan</th>
+        <th>Kota</th>
+        <th>Barang</th>
+        <th class="r">Qty</th>
+        <th class="r">Harga</th>
+        <th class="r">Subtotal</th>
+        <th>Status</th>
+        <th>Stok</th>
+      </tr></thead>
+      <tbody id="lapJualBody"></tbody>
+    </table></div>
+    <div class="ok-msg" id="lapJualOk"></div>
   </div>
 </div>
 
@@ -588,8 +629,9 @@ function drumStr(kg, isiDrum){
 }
 
 // ===================== STATE =====================
-let auth=null, db=null, unsub=null;
+let auth=null, db=null, unsub=null, unsubSales=null;
 let items = [];
+let sales = [];
 let curTab = 'dash';
 let fltMinusOn = false, fisBelumOn = false;
 let editDocId = null, histDocId = null;
@@ -627,6 +669,7 @@ onAuthStateChanged(auth, user => {
     $('gate').style.display='block'; $('app').style.display='none';
     $('userBox').style.display='none'; $('logoutBtn').style.display='none';
     if(unsub){ unsub(); unsub=null; }
+    if(unsubSales){ unsubSales(); unsubSales=null; }
   }
 });
 
@@ -644,12 +687,20 @@ window.doLogout = function(){ if(auth) signOut(auth); };
 
 function startListening(){
   if(unsub) unsub();
+  if(unsubSales) unsubSales();
   const q = query(collection(db, COLL), orderBy('nama'));
   unsub = onSnapshot(q, snap => {
     items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     renderAll();
   }, err => {
     alert('Gagal membaca database: '+err.message+'\n\nCek Rules Firestore — koleksi "'+COLL+'" harus diizinkan untuk user login.');
+  });
+  const sq = query(collection(db, SALES_COLL), orderBy('tanggal'));
+  unsubSales = onSnapshot(sq, snap => {
+    sales = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if(curTab==='lapjual') renderLaporanJual();
+  }, err => {
+    console.warn('Gagal membaca penjualan:', err);
   });
 }
 
@@ -659,6 +710,10 @@ function normalizeName(s){
 
 function makeSaleRef(r){
   return ['jual', r.tanggal, r.noNota||'', r.pelanggan||'', r.namaRaw||'', r.qty, r.harga].join('|').toLowerCase();
+}
+
+function validJualRows(){
+  return jualRows.filter(r => r.checked && !r.invalidDate && findExact(r.target) && r.qty > 0 && r.harga > 0);
 }
 
 // ===================== MATCHING NAMA =====================
@@ -687,7 +742,7 @@ function fuzzyFind(nama){
 // ===================== TABS & RENDER =====================
 window.setTab = function(t){
   curTab = t;
-  ['dash','stok','jual','imp','mutasi','fisik'].forEach(x => {
+  ['dash','stok','jual','lapjual','imp','mutasi','fisik'].forEach(x => {
     $('tb_'+x).className = 'tab-btn' + (x===t?' act':'');
     $('tab_'+x).style.display = x===t ? 'block':'none';
   });
@@ -699,6 +754,7 @@ function renderAll(){
   renderKatOptions();
   if(curTab==='dash') renderDash();
   if(curTab==='stok') renderStok();
+  if(curTab==='lapjual') renderLaporanJual();
   if(curTab==='mutasi') renderMutasi();
   if(curTab==='fisik') renderFisik();
   $('itemList').innerHTML = items.map(it=>`<option value="${esc(it.nama)}">`).join('');
@@ -1219,6 +1275,7 @@ window.parseJual = function(){
   const iSat = idxAny('sat','satuan','unit');
   const iHarga = idxAny('harga jual','harga','price');
   const iSubtotal = idxAny('subtotal','sub total','total');
+  const iHargaMaster = header.findIndex(h => h.includes('harga master'));
   const iStatus = idxAny('status','pembayaran');
   if(iTgl < 0 || iPelanggan < 0 || iNama < 0 || iQty < 0 || iHarga < 0){
     showMsg('jualErr','Kolom wajib belum lengkap. Harus ada: Tanggal, Pelanggan, Nama Barang, Qty, dan Harga.', 9000);
@@ -1226,6 +1283,7 @@ window.parseJual = function(){
   }
 
   const existingRefs = new Set();
+  sales.forEach(s => { if(s.ref) existingRefs.add(s.ref); });
   items.forEach(it => (it.mutasi||[]).forEach(m => { if(m.ref) existingRefs.add(m.ref); }));
 
   for(let i=1;i<lines.length;i++){
@@ -1242,16 +1300,19 @@ window.parseJual = function(){
     const noNota = iNota>=0 ? String(r[iNota]||'').trim() : '';
     const sat = iSat>=0 ? String(r[iSat]||'kg').trim() : 'kg';
     const subtotal = iSubtotal>=0 ? (parseHargaValue(r[iSubtotal]) || Math.round(qty * harga)) : Math.round(qty * harga);
+    const hargaMasterSheet = iHargaMaster>=0 ? parseHargaValue(r[iHargaMaster]) : 0;
     const status = iStatus>=0 ? String(r[iStatus]||'').trim() : '';
     const exact = findExact(namaRaw);
     const fuzzy = exact ? null : fuzzyFind(namaRaw);
     const match = exact || fuzzy;
     const row = {
-      tanggal, pelanggan, kota, noNota, namaRaw, qty, sat, harga, subtotal, status,
+      tanggal, pelanggan, kota, noNota, namaRaw, qty, sat, harga, subtotal, status, hargaMasterSheet,
       target: match ? match.nama : '', itemId: match ? match.id : '',
       fuzzy: !!fuzzy, invalidDate: !parsedDate.ok,
       rawTanggal: parsedDate.raw || String(r[iTgl]||'').trim()
     };
+    row.hargaMaster = match ? hargaOf(match) : hargaMasterSheet;
+    row.selisihHarga = row.hargaMaster ? harga - row.hargaMaster : 0;
     row.ref = makeSaleRef(row);
     row.dup = existingRefs.has(row.ref);
     row.checked = !!exact && !row.dup && !row.invalidDate;
@@ -1282,13 +1343,16 @@ window.parseJual = function(){
         <th style="min-width:200px">→ Barang stok</th>
         <th class="r">Qty</th>
         <th class="r">Harga</th>
+        <th class="r">Master</th>
         <th class="r">Subtotal</th>
         <th style="width:100px"></th>
       </tr></thead>
       <tbody>${jualRows.map((r,i)=>jualRowHtml(r,i)).join('')}</tbody>
     </table></div>
     <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
-      <button class="btn btn-t" onclick="doJualImport()" id="jualGoBtn">💾 Simpan penjualan & kurangi stok</button>
+      <button class="btn btn-line" onclick="doJualImport(false)" id="jualOnlyBtn">💾 Simpan penjualan saja</button>
+      <button class="btn btn-t" onclick="doJualImport(true)" id="jualStockBtn">💾 Simpan & kurangi stok</button>
+      <button class="btn btn-line" onclick="resetJualImport()">Reset</button>
       <span class="hint" style="margin:0">Harga disimpan per transaksi. Master harga barang tidak diubah.</span>
     </div>
     <div class="ok-msg" id="jualOk"></div>`;
@@ -1307,6 +1371,7 @@ function jualRowHtml(r, i){
     <td><input class="${cls}" list="itemList" value="${esc(r.target)}" oninput="jualOnTarget(${i},this)" placeholder="Pilih barang stok..."></td>
     <td class="r">${num(r.qty)} ${esc(r.sat)}</td>
     <td class="r">${rp(r.harga)}</td>
+    <td class="r">${r.hargaMaster?`${rp(r.hargaMaster)}${r.selisihHarga?`<br><span class="${r.selisihHarga<0?'neg':'pos'}">${r.selisihHarga>0?'+':''}${rp(r.selisihHarga)}</span>`:''}`:'<span class="zero">-</span>'}</td>
     <td class="r" style="font-weight:700">${rp(r.subtotal)}</td>
     <td style="font-size:10.5px">
       ${r.dup?'<span class="tag tag-dup">duplikat?</span> ':''}
@@ -1325,6 +1390,8 @@ window.jualOnTarget = function(i, inp){
   const exact = findExact(inp.value);
   jualRows[i].target = inp.value;
   jualRows[i].itemId = exact ? exact.id : '';
+  jualRows[i].hargaMaster = exact ? hargaOf(exact) : 0;
+  jualRows[i].selisihHarga = jualRows[i].hargaMaster ? jualRows[i].harga - jualRows[i].hargaMaster : 0;
   jualRows[i].fuzzy = false;
   inp.className = exact ? 'ok' : 'warn';
 };
@@ -1336,21 +1403,34 @@ window.jualToggleAll = function(v){
   });
 };
 
-window.doJualImport = async function(){
-  const rows = jualRows.filter(r => r.checked && !r.invalidDate && findExact(r.target) && r.qty > 0 && r.harga > 0);
+window.resetJualImport = function(){
+  jualRows = [];
+  $('jualTsv').value = '';
+  $('jualPreview').innerHTML = '';
+  $('jualErr').style.display = 'none';
+};
+
+window.doJualImport = async function(kurangiStok){
+  const rows = validJualRows();
   if(!rows.length){ showMsg('jualErr','Tidak ada baris penjualan valid yang dicentang.', 5000); return; }
-  const btn = $('jualGoBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
+  const btnOnly = $('jualOnlyBtn'), btnStock = $('jualStockBtn');
+  if(btnOnly) btnOnly.disabled = true;
+  if(btnStock) btnStock.disabled = true;
+  const activeBtn = kurangiStok ? btnStock : btnOnly;
+  if(activeBtn) activeBtn.innerHTML = '<span class="spinner"></span> Menyimpan...';
   try {
     const byItem = {};
-    rows.forEach(r => {
-      const it = findExact(r.target);
-      if(!byItem[it.id]) byItem[it.id] = { it, add: [] };
-      byItem[it.id].add.push({
-        jenis:'keluar', tanggal:r.tanggal, qty:r.qty, sat:r.sat,
-        pihak:r.pelanggan, noNota:r.noNota, ref:r.ref,
-        hargaJual:r.harga, subtotal:r.subtotal, sumber:'penjualan'
+    if(kurangiStok){
+      rows.forEach(r => {
+        const it = findExact(r.target);
+        if(!byItem[it.id]) byItem[it.id] = { it, add: [] };
+        byItem[it.id].add.push({
+          jenis:'keluar', tanggal:r.tanggal, qty:r.qty, sat:r.sat,
+          pihak:r.pelanggan, noNota:r.noNota, ref:r.ref,
+          hargaJual:r.harga, subtotal:r.subtotal, sumber:'penjualan'
+        });
       });
-    });
+    }
     let batch = writeBatch(db), n = 0;
     for(const r of rows){
       const it = findExact(r.target);
@@ -1358,25 +1438,114 @@ window.doJualImport = async function(){
         tanggal:r.tanggal, pelanggan:r.pelanggan, kota:r.kota, noNota:r.noNota,
         itemId:it.id, namaBarang:it.nama, namaNota:r.namaRaw,
         qty:r.qty, sat:r.sat, harga:r.harga, subtotal:r.subtotal, status:r.status,
+        hargaMaster:r.hargaMaster||0, selisihHarga:r.selisihHarga||0,
+        stockDeducted: !!kurangiStok,
         ref:r.ref, createdBy:userEmail(), createdAt:serverTimestamp()
       });
       n++;
     }
-    for(const id of Object.keys(byItem)){
-      const { it, add } = byItem[id];
-      batch.update(doc(db, COLL, id), { mutasi: [...(it.mutasi||[]), ...add] });
-      n++;
+    if(kurangiStok){
+      for(const id of Object.keys(byItem)){
+        const { it, add } = byItem[id];
+        batch.update(doc(db, COLL, id), { mutasi: [...(it.mutasi||[]), ...add] });
+        n++;
+      }
     }
     await batch.commit();
     const total = rows.reduce((s,r)=>s+r.subtotal,0);
-    await auditLog('import_penjualan', { jumlah: rows.length, total, barang: Object.keys(byItem).length });
-    showMsg('jualOk', `✔ ${rows.length} baris penjualan disimpan. Total ${rp(total)}. Stok sudah dikurangi.`, 8000);
+    await auditLog(kurangiStok ? 'import_penjualan_stok' : 'import_penjualan_saja', { jumlah: rows.length, total, barang: Object.keys(byItem).length });
+    showMsg('jualOk', `✔ ${rows.length} baris penjualan disimpan. Total ${rp(total)}.${kurangiStok?' Stok sudah dikurangi.':' Stok tidak diubah.'}`, 8000);
     $('jualTsv').value='';
     setTimeout(()=>{ $('jualPreview').innerHTML=''; jualRows=[]; }, 2500);
   } catch(e){
     showMsg('jualErr','Gagal menyimpan penjualan: '+e.message, 8000);
-    btn.disabled = false; btn.textContent = '💾 Coba lagi';
+    if(btnOnly){ btnOnly.disabled = false; btnOnly.textContent = '💾 Simpan penjualan saja'; }
+    if(btnStock){ btnStock.disabled = false; btnStock.textContent = '💾 Simpan & kurangi stok'; }
   }
+};
+
+function filteredSales(){
+  const cari = $('lapJualCari') ? $('lapJualCari').value.trim().toLowerCase() : '';
+  const status = $('lapJualStatus') ? $('lapJualStatus').value : '';
+  const dari = $('lapJualDari') ? $('lapJualDari').value : '';
+  const sampai = $('lapJualSampai') ? $('lapJualSampai').value : '';
+  let list = [...sales];
+  if(dari) list = list.filter(s => String(s.tanggal||'') >= dari);
+  if(sampai) list = list.filter(s => String(s.tanggal||'') <= sampai);
+  if(status) list = list.filter(s => String(s.status||'') === status);
+  if(cari) list = list.filter(s =>
+    String(s.pelanggan||'').toLowerCase().includes(cari) ||
+    String(s.kota||'').toLowerCase().includes(cari) ||
+    String(s.noNota||'').toLowerCase().includes(cari) ||
+    String(s.namaBarang||s.namaNota||'').toLowerCase().includes(cari));
+  list.sort((a,b)=>String(b.tanggal||'').localeCompare(String(a.tanggal||'')) || String(a.pelanggan||'').localeCompare(String(b.pelanggan||'')));
+  return list;
+}
+
+function renderLaporanStatusOptions(){
+  const sel = $('lapJualStatus'); if(!sel) return;
+  const cur = sel.value;
+  const statuses = [...new Set(sales.map(s=>s.status).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">Semua status</option>' + statuses.map(s=>`<option value="${esc(s)}"${s===cur?' selected':''}>${esc(s)}</option>`).join('');
+}
+
+window.renderLaporanJual = function(){
+  if(!$('lapJualBody')) return;
+  renderLaporanStatusOptions();
+  const list = filteredSales();
+  const total = list.reduce((s,x)=>s+(parseFloat(x.subtotal)||0),0);
+  const qty = list.reduce((s,x)=>s+(parseFloat(x.qty)||0),0);
+  const pelanggan = new Set(list.map(x=>x.pelanggan).filter(Boolean)).size;
+  const stokDeducted = list.filter(x=>x.stockDeducted).length;
+  $('lapJualSum').innerHTML = `<span>Baris: <b>${list.length}</b></span>
+    <span>Pelanggan: <b>${pelanggan}</b></span>
+    <span>Total qty: <b>${num(qty)}</b></span>
+    <span>Total jual: <b>${rp(total)}</b></span>
+    <span>Sudah kurangi stok: <b>${stokDeducted}</b></span>`;
+  if(!list.length){
+    $('lapJualBody').innerHTML = `<tr><td colspan="9" class="empty">${sales.length?'Tidak ada penjualan yang cocok dengan filter.':'Belum ada data penjualan.'}</td></tr>`;
+    return;
+  }
+  $('lapJualBody').innerHTML = list.map(s => {
+    const diff = parseFloat(s.selisihHarga)||0;
+    return `<tr>
+      <td>${isoToDisp(s.tanggal)}</td>
+      <td class="nama-cell">${esc(s.pelanggan||'')}<span class="kat">${esc(s.noNota||'')}</span></td>
+      <td>${esc(s.kota||'')}</td>
+      <td class="nama-cell">${esc(s.namaBarang||s.namaNota||'')}<span class="kat">${s.hargaMaster?`Master ${rp(s.hargaMaster)}${diff?` · <span class="${diff<0?'neg':'pos'}">${diff>0?'+':''}${rp(diff)}</span>`:''}`:''}</span></td>
+      <td class="r">${num(s.qty)} ${esc(s.sat||'')}</td>
+      <td class="r">${rp(s.harga)}</td>
+      <td class="r" style="font-weight:700">${rp(s.subtotal)}</td>
+      <td>${esc(s.status||'')}</td>
+      <td>${s.stockDeducted?'<span class="tag tag-keluar">keluar</span>':'<span class="tag">tidak</span>'}</td>
+    </tr>`;
+  }).join('');
+};
+
+window.lapJualResetDate = function(){
+  $('lapJualDari').value = '';
+  $('lapJualSampai').value = '';
+  renderLaporanJual();
+};
+
+window.copyLaporanJual = function(){
+  const list = filteredSales();
+  if(!list.length){ alert('Tidak ada data laporan untuk dicopy.'); return; }
+  const header = ['Tanggal','Pelanggan','Kota','No Nota','Barang','Qty','Sat','Harga','Harga Master','Selisih Harga','Subtotal','Status','Stok Dikurangi'].join('\t');
+  const rows = list.map(s => [
+    isoToDisp(s.tanggal), s.pelanggan||'', s.kota||'', s.noNota||'', s.namaBarang||s.namaNota||'',
+    String(s.qty||0).replace('.',','), s.sat||'', s.harga||0, s.hargaMaster||'', s.selisihHarga||'',
+    s.subtotal||0, s.status||'', s.stockDeducted?'YA':'TIDAK'
+  ].join('\t'));
+  const tsv = header + '\n' + rows.join('\n');
+  navigator.clipboard.writeText(tsv).then(()=>showMsg('lapJualOk','✔ Laporan berhasil dicopy.'))
+  .catch(()=>{
+    const ta = document.createElement('textarea');
+    ta.value = tsv; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    showMsg('lapJualOk','✔ Laporan berhasil dicopy.');
+  });
 };
 
 // ===================== MODAL EDIT BARANG =====================
