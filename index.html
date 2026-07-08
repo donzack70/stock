@@ -456,6 +456,8 @@ const firebaseConfig = {
   appId: "1:888220688334:web:89fcbcf1d375448c8a159f"
 };
 const COLL = 'stok_items'; // koleksi khusus app ini — terpisah dari 'transaksi'
+const AUDIT_COLL = 'stok_audit_logs';
+const ARCHIVE_COLL = 'stok_opname_archives';
 
 // ===================== HELPERS =====================
 const $ = id => document.getElementById(id);
@@ -474,6 +476,49 @@ const parseId = v => { let s = String(v ?? '').trim(); if(!s) return 0;
 const isoToDisp = iso => { if(!iso) return ''; const p = String(iso).split('-'); return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : iso; };
 const dispToIso = d => { const p = String(d||'').trim().split('/'); return p.length===3 ? p[2]+'-'+pad2(parseInt(p[1])||1)+'-'+pad2(parseInt(p[0])||1) : ''; };
 function showMsg(id, txt, ms=3500){ const el=$(id); el.textContent=txt; el.style.display='block'; if(ms) setTimeout(()=>el.style.display='none', ms); }
+const todayIso = () => new Date().toISOString().slice(0,10);
+const userEmail = () => auth && auth.currentUser ? auth.currentUser.email : '';
+
+function validIsoDate(iso){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(iso||''))) return false;
+  const d = new Date(iso + 'T00:00:00');
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0,10) === iso;
+}
+
+function parseImportDate(raw){
+  const s = String(raw ?? '').trim();
+  if(!s) return { iso: todayIso(), ok: true, empty: true };
+  if(/^\d{4}-\d{1,2}-\d{1,2}$/.test(s)){
+    const [y,m,d] = s.split('-').map(Number);
+    const iso = `${y}-${pad2(m)}-${pad2(d)}`;
+    return { iso, ok: validIsoDate(iso), empty: false };
+  }
+  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if(m){
+    let y = parseInt(m[3],10);
+    if(y < 100) y += 2000;
+    const iso = `${y}-${pad2(parseInt(m[2],10))}-${pad2(parseInt(m[1],10))}`;
+    return { iso, ok: validIsoDate(iso), empty: false };
+  }
+  if(/^\d+(\.\d+)?$/.test(s)){
+    const serial = parseFloat(s);
+    if(serial > 20000 && serial < 80000){
+      const d = new Date(Date.UTC(1899,11,30) + serial * 86400000);
+      return { iso: d.toISOString().slice(0,10), ok: true, empty: false };
+    }
+  }
+  return { iso: '', ok: false, empty: false, raw: s };
+}
+
+async function auditLog(action, detail={}){
+  try {
+    await addDoc(collection(db, AUDIT_COLL), {
+      action, detail, user: userEmail(), createdAt: serverTimestamp()
+    });
+  } catch(e) {
+    console.warn('Audit log gagal:', e);
+  }
+}
 
 function drumStr(kg, isiDrum){
   if(!isiDrum || isiDrum <= 0 || kg === 0) return '';
@@ -812,11 +857,20 @@ window.stokSaveAll = async function(){
   const changed = items.filter(it => stokRowChanged(it));
   if(!changed.length) return;
   // validasi nama kosong / duplikat
-  const namesLower = new Set(items.map(it=>it.nama.toLowerCase()));
+  const finalNames = new Map();
   for(const it of changed){
     const d = stokDraft[it.id];
     const nm = d.nama.trim();
     if(!nm){ alert(`Nama barang tidak boleh kosong (lihat baris "${it.nama}").`); return; }
+  }
+  for(const it of items){
+    const d = stokDraft[it.id];
+    const nm = (d ? d.nama : it.nama).trim().toLowerCase();
+    if(finalNames.has(nm)){
+      alert(`Nama barang duplikat: "${d ? d.nama.trim() : it.nama}". Perbaiki dulu supaya import mutasi tidak salah target.`);
+      return;
+    }
+    finalNames.set(nm, it.id);
   }
   const btn = $('stokSaveAllBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
   try {
@@ -831,6 +885,7 @@ window.stokSaveAll = async function(){
       if(inBatch >= 400){ await batch.commit(); batch = writeBatch(db); inBatch = 0; }
     }
     if(inBatch>0) await batch.commit();
+    await auditLog('stok_edit_massal', { jumlah: changed.length });
     stokDraft = {};
     // onSnapshot akan re-render; pastikan bar reset
     setTimeout(()=>{ if(stokEditMode) renderStokEdit(); }, 300);
@@ -941,6 +996,7 @@ window.importMasterGo = async function(){
       if(inBatch >= 400){ await batch.commit(); batch = writeBatch(db); inBatch = 0; }
     }
     if(inBatch > 0) await batch.commit();
+    await auditLog('import_master', { barangBaru: nBaru, diperbarui: nUpdate, dilewati: nSkip });
     showMsg('mImpOk', `✔ Selesai: ${nBaru} barang baru, ${nUpdate} diperbarui${nSkip?`, ${nSkip} dilewati`:''}.`, 7000);
     $('mImpTsv').value=''; $('mImpPrev').innerHTML=''; masterParsed=[];
   } catch(e){
@@ -985,6 +1041,7 @@ window.saveEdit = async function(){
   try {
     if(editDocId) await updateDoc(doc(db, COLL, editDocId), payload);
     else await addDoc(collection(db, COLL), { ...payload, mutasi: [], fisik: null, createdAt: serverTimestamp() });
+    await auditLog(editDocId ? 'barang_update' : 'barang_tambah', { nama });
     closeEdit();
   } catch(e){ showMsg('eErr','Gagal: '+e.message, 6000); }
   btn.disabled = false; btn.textContent = '💾 Simpan';
@@ -993,7 +1050,7 @@ window.saveEdit = async function(){
 window.delItemFromModal = async function(){
   const it = items.find(x=>x.id===editDocId); if(!it) return;
   if(!confirm(`Hapus barang "${it.nama}"?\nSemua riwayat mutasi dan hitungan fisiknya ikut terhapus.`)) return;
-  try { await deleteDoc(doc(db, COLL, editDocId)); closeEdit(); }
+  try { await deleteDoc(doc(db, COLL, editDocId)); await auditLog('barang_hapus', { id: editDocId, nama: it.nama }); closeEdit(); }
   catch(e){ showMsg('eErr','Gagal: '+e.message, 6000); }
 };
 
@@ -1026,7 +1083,7 @@ window.delMutasi = async function(i){
   const m = (it.mutasi||[])[i]; if(!m) return;
   if(!confirm(`Hapus mutasi ${m.jenis} ${num(m.qty)} tanggal ${isoToDisp(m.tanggal)}?`)) return;
   const mutasi = (it.mutasi||[]).filter((_,x)=>x!==i);
-  try { await updateDoc(doc(db, COLL, it.id), { mutasi }); setTimeout(refreshHist, 400); }
+  try { await updateDoc(doc(db, COLL, it.id), { mutasi }); await auditLog('mutasi_hapus_riwayat', { barang: it.nama, jenis: m.jenis, qty: m.qty, tanggal: m.tanggal }); setTimeout(refreshHist, 400); }
   catch(e){ alert('Gagal: '+e.message); }
 };
 
@@ -1071,7 +1128,8 @@ window.parseImport = function(){
     const namaRaw = String(r[iNama]||'').trim();
     const qty = parseId(r[iQty]);
     if(!namaRaw || qty <= 0) continue;
-    const tanggal = (iTgl>=0 ? dispToIso(r[iTgl]) : '') || new Date().toISOString().slice(0,10);
+    const parsedDate = iTgl>=0 ? parseImportDate(r[iTgl]) : { iso: todayIso(), ok: true, empty: true };
+    const tanggal = parsedDate.iso;
     const pihak = iPihak>=0 ? String(r[iPihak]||'').trim() : '';
     const noNota = iNota>=0 ? String(r[iNota]||'').trim() : '';
     const sat = iSat>=0 ? String(r[iSat]||'kg').trim() : 'kg';
@@ -1084,23 +1142,29 @@ window.parseImport = function(){
       jenis, tanggal, pihak, noNota, sat, qty, namaRaw, ref,
       target: match ? match.nama : '',
       fuzzy: !!fuzzy,
+      invalidDate: !parsedDate.ok,
+      rawTanggal: parsedDate.raw || String(iTgl>=0 ? (r[iTgl]||'') : '').trim(),
       dup: existingRefs.has(ref),
-      checked: !existingRefs.has(ref)
+      checked: !!exact && !existingRefs.has(ref) && parsedDate.ok
     });
   }
   if(!importRows.length){ showMsg('impErr','Tidak ada baris valid.', 6000); return; }
 
   const nDup = importRows.filter(r=>r.dup).length;
   const nNoMatch = importRows.filter(r=>!r.target).length;
+  const nFuzzy = importRows.filter(r=>r.fuzzy).length;
+  const nBadDate = importRows.filter(r=>r.invalidDate).length;
   $('impPreview').innerHTML = `
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
       <span class="tag ${jenis==='masuk'?'tag-masuk':'tag-keluar'}" style="font-size:12px;padding:3px 12px">Disimpan sebagai: BARANG ${jenis.toUpperCase()} — ${importRows.length} baris</span>
       ${nDup?`<span class="tag tag-dup">${nDup} kemungkinan duplikat (tidak dicentang)</span>`:''}
       ${nNoMatch?`<span class="tag tag-fuzzy">${nNoMatch} tidak ketemu — pilih manual atau hilangkan centang</span>`:''}
+      ${nFuzzy?`<span class="tag tag-fuzzy">${nFuzzy} cocok mirip, wajib dicek manual</span>`:''}
+      ${nBadDate?`<span class="tag tag-dup">${nBadDate} tanggal tidak terbaca</span>`:''}
     </div>
     <div class="tbl-wrap"><table class="prev-tbl">
       <thead><tr>
-        <th style="width:30px"><input type="checkbox" id="impAll" checked onchange="impToggleAll(this.checked)" style="width:15px;height:15px"></th>
+        <th style="width:30px"><input type="checkbox" id="impAll" onchange="impToggleAll(this.checked)" style="width:15px;height:15px"></th>
         <th style="width:78px">Tanggal</th>
         <th>Pihak</th>
         <th>Nama di nota</th>
@@ -1112,16 +1176,19 @@ window.parseImport = function(){
     </table></div>
     <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
       <button class="btn ${jenis==='masuk'?'btn-g':'btn-t'}" onclick="doImport()" id="impGoBtn">💾 Simpan mutasi terpilih (${jenis.toUpperCase()})</button>
-      <span class="hint" style="margin:0">Baris tanpa "Barang stok" tidak akan disimpan.</span>
+      <span class="hint" style="margin:0">Baris fuzzy / tanggal salah sengaja tidak dicentang otomatis. Cek dulu sebelum simpan.</span>
     </div>
     <div class="ok-msg" id="impOk"></div>`;
 };
 
 function impRowHtml(r, i){
   const cls = r.target ? (r.fuzzy ? 'warn' : 'ok') : 'warn';
+  const dateHtml = r.invalidDate
+    ? `<span style="color:#c0392b;font-weight:700">Tanggal salah</span><br><span style="color:#aaa">${esc(r.rawTanggal||'-')}</span>`
+    : isoToDisp(r.tanggal);
   return `<tr>
     <td><input type="checkbox" id="impC_${i}" ${r.checked?'checked':''} onchange="importRows[${i}].checked=this.checked" style="width:15px;height:15px"></td>
-    <td>${isoToDisp(r.tanggal)}</td>
+    <td>${dateHtml}</td>
     <td style="color:#888;font-size:11.5px">${esc(r.pihak)}${r.noNota?'<br><span style="color:#bbb;font-size:10.5px">'+esc(r.noNota)+'</span>':''}</td>
     <td style="font-size:11.5px;color:#666">${esc(r.namaRaw)}</td>
     <td><input class="${cls}" list="itemList" value="${esc(r.target)}" oninput="impOnTarget(${i},this)" placeholder="Pilih barang stok..."></td>
@@ -1129,6 +1196,7 @@ function impRowHtml(r, i){
     <td style="font-size:10.5px">
       ${r.dup?'<span class="tag tag-dup">duplikat?</span> ':''}
       ${r.fuzzy?'<span class="tag tag-fuzzy">🔀 fuzzy</span>':''}
+      ${r.invalidDate?'<span class="tag tag-dup">tanggal</span>':''}
       ${!r.target?'<span style="color:#b7600a">⚠ pilih</span>':''}
     </td>
   </tr>`;
@@ -1140,10 +1208,10 @@ window.impOnTarget = function(i, inp){
   importRows[i].fuzzy = false;
   inp.className = exact ? 'ok' : 'warn';
 };
-window.impToggleAll = function(v){ importRows.forEach((r,i)=>{ r.checked=v; const c=$('impC_'+i); if(c) c.checked=v; }); };
+window.impToggleAll = function(v){ importRows.forEach((r,i)=>{ r.checked=v && !r.invalidDate && !r.dup; const c=$('impC_'+i); if(c) c.checked=r.checked; }); };
 
 window.doImport = async function(){
-  const rows = importRows.filter(r => r.checked && r.target && findExact(r.target) && r.qty > 0);
+  const rows = importRows.filter(r => r.checked && !r.invalidDate && r.target && findExact(r.target) && r.qty > 0);
   if(!rows.length){ showMsg('impErr','Tidak ada baris valid yang dicentang.', 5000); return; }
   const btn = $('impGoBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
   try {
@@ -1157,6 +1225,7 @@ window.doImport = async function(){
       const { it, add } = byItem[id];
       await updateDoc(doc(db, COLL, id), { mutasi: [...(it.mutasi||[]), ...add] });
     }
+    await auditLog('import_mutasi', { jenis: importJenis, jumlah: rows.length, barang: Object.keys(byItem).length });
     showMsg('impOk', `✔ ${rows.length} mutasi (${importJenis}) disimpan ke ${Object.keys(byItem).length} barang.`, 6000);
     $('impTsv').value='';
     setTimeout(()=>{ $('impPreview').innerHTML=''; importRows=[]; }, 2500);
@@ -1294,16 +1363,21 @@ window.mutSave = async function(itemId, idx){
 
   const btn = $('mutsave_'+key.replace('#','_')); if(btn){ btn.disabled=true; btn.textContent='…'; }
   try {
+    const batch = writeBatch(db);
     if(targetItem.id !== itemId){
       // pindah ke barang lain
       arr.splice(idx,1);
       const tArr = [...(targetItem.mutasi||[]), newM];
-      await updateDoc(doc(db, COLL, itemId), { mutasi: arr });
-      await updateDoc(doc(db, COLL, targetItem.id), { mutasi: tArr });
+      batch.update(doc(db, COLL, itemId), { mutasi: arr });
+      batch.update(doc(db, COLL, targetItem.id), { mutasi: tArr });
     } else {
       arr[idx] = newM;
-      await updateDoc(doc(db, COLL, itemId), { mutasi: arr });
+      batch.update(doc(db, COLL, itemId), { mutasi: arr });
     }
+    await batch.commit();
+    await auditLog('mutasi_edit', {
+      dariBarang: it.nama, keBarang: targetItem.nama, jenis: newM.jenis, qty: newM.qty, tanggal: newM.tanggal
+    });
     mutDraft = {}; // index bisa bergeser → reset semua draft, onSnapshot re-render
   } catch(e){
     alert('Gagal: '+e.message);
@@ -1316,7 +1390,7 @@ window.mutDel = async function(itemId, idx){
   const m = (it.mutasi||[])[idx]; if(!m) return;
   if(!confirm(`Hapus mutasi ${m.jenis} ${num(m.qty)} (${it.nama}) tanggal ${isoToDisp(m.tanggal)}?`)) return;
   const arr = (it.mutasi||[]).filter((_,x)=>x!==idx);
-  try { mutDraft = {}; await updateDoc(doc(db, COLL, itemId), { mutasi: arr }); }
+  try { mutDraft = {}; await updateDoc(doc(db, COLL, itemId), { mutasi: arr }); await auditLog('mutasi_hapus', { barang: it.nama, jenis: m.jenis, qty: m.qty, tanggal: m.tanggal }); }
   catch(e){ alert('Gagal: '+e.message); }
 };
 
@@ -1378,6 +1452,7 @@ window.fisSave = async function(id){
   const btn = $('fisSave_'+id); if(btn){ btn.disabled=true; btn.textContent='...'; }
   try {
     await updateDoc(doc(db, COLL, id), { fisik });
+    await auditLog('fisik_simpan', { barang: it.nama, fisikKg: fisikKgOf({ ...it, fisik }) });
     delete fisikDraft[id];
   } catch(e){ alert('Gagal: '+e.message); }
 };
@@ -1386,24 +1461,48 @@ window.kunciOpname = async function(){
   const dihitung = items.filter(it=>it.fisik);
   if(!dihitung.length){ alert('Belum ada barang yang dihitung fisik.'); return; }
   const belum = items.length - dihitung.length;
+  const periodId = 'opname_' + Date.now();
   const msg = `Kunci opname & mulai periode baru?\n\n` +
     `• ${dihitung.length} barang yang SUDAH dihitung → stok awal baru = hasil fisik\n` +
     (belum ? `• ${belum} barang yang BELUM dihitung → stok awal baru = stok teoritis\n` : '') +
-    `• Semua riwayat mutasi & hitungan fisik direset ke 0\n\nTindakan ini tidak bisa dibatalkan.`;
+    `• Arsip opname akan dibuat dulu di koleksi "${ARCHIVE_COLL}"\n` +
+    `• Setelah arsip berhasil, riwayat mutasi & hitungan fisik direset ke 0\n\nTindakan ini besar dan perlu dicek matang.`;
   if(!confirm(msg)) return;
-  if(!confirm('Yakin? Ketik OK sekali lagi untuk melanjutkan.')) return;
+  const typed = prompt('Untuk melanjutkan, ketik: KUNCI');
+  if(typed !== 'KUNCI'){ alert('Dibatalkan. Opname belum dikunci.'); return; }
   try {
     let batch = writeBatch(db), n = 0;
     for(const it of items){
       const f = fisikKgOf(it);
       const newAwal = f !== null ? f : teoritisOf(it);
+      batch.set(doc(collection(db, ARCHIVE_COLL)), {
+        periodId,
+        itemId: it.id,
+        nama: it.nama || '',
+        kat: it.kat || '',
+        sat: it.sat || 'kg',
+        isiDrum: parseFloat(it.isiDrum)||0,
+        harga: hargaOf(it),
+        stokAwalLama: parseFloat(it.stokAwal)||0,
+        totalMasuk: sumMut(it,'masuk'),
+        totalKeluar: sumMut(it,'keluar'),
+        teoritis: Math.round(teoritisOf(it)*100)/100,
+        fisikKg: f,
+        selisih: selisihOf(it),
+        stokAwalBaru: Math.round(newAwal*100)/100,
+        mutasi: it.mutasi || [],
+        fisik: it.fisik || null,
+        lockedBy: userEmail(),
+        lockedAt: serverTimestamp()
+      });
       batch.update(doc(db, COLL, it.id), { stokAwal: Math.round(newAwal*100)/100, mutasi: [], fisik: null });
       n++;
-      if(n % 400 === 0){ await batch.commit(); batch = writeBatch(db); }
+      if(n % 200 === 0){ await batch.commit(); batch = writeBatch(db); }
     }
     await batch.commit();
+    await auditLog('opname_kunci', { periodId, totalBarang: items.length, dihitung: dihitung.length, belum });
     fisikDraft = {};
-    alert('✔ Opname dikunci. Periode baru dimulai dengan stok awal dari hasil hitung.');
+    alert(`✔ Opname dikunci.\nArsip periode: ${periodId}\nPeriode baru dimulai dengan stok awal dari hasil hitung.`);
   } catch(e){ alert('Gagal: '+e.message); }
 };
 
