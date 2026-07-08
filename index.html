@@ -186,6 +186,39 @@ tr:hover td{background:#fafafe}
 
 <!-- ====== DASHBOARD ====== -->
 <div id="tab_dash" style="display:none">
+  <div class="card">
+    <div class="card-title">💵 Ringkasan Penjualan
+      <span class="spacer"></span>
+      <button class="btn btn-line btn-sm" onclick="exportBackup()">⬇️ Backup data</button>
+    </div>
+    <div class="mut-sum" id="dashSalesSum"></div>
+    <div class="mv-grid">
+      <div>
+        <div class="card-title" style="color:#2565c7;margin-top:4px">Pelanggan Terbesar</div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Pelanggan</th><th class="r">Total</th></tr></thead>
+          <tbody id="dashSalesCust"></tbody>
+        </table></div>
+      </div>
+      <div>
+        <div class="card-title" style="color:#1e7a45;margin-top:4px">Barang Terlaris</div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Barang</th><th class="r">Qty</th><th class="r">Total</th></tr></thead>
+          <tbody id="dashSalesItems"></tbody>
+        </table></div>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <div class="card-title" style="color:#b7600a">Harga Beda Dari Master</div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Tanggal</th><th>Pelanggan</th><th>Barang</th><th class="r">Jual</th><th class="r">Master</th><th class="r">Selisih</th></tr></thead>
+        <tbody id="dashSalesPrice"></tbody>
+      </table></div>
+      <div class="hint">Ini hanya penanda untuk dicek, bukan aturan benar/salah. Harga grosir dan eceran memang bisa berbeda.</div>
+    </div>
+    <div class="ok-msg" id="backupOk"></div>
+    <div class="err-msg" id="backupErr"></div>
+  </div>
   <div class="mv-grid">
     <div class="card" style="margin-bottom:0">
       <div class="card-title" style="color:#1e7a45">📥 Paling Banyak MASUK (periode ini)</div>
@@ -321,8 +354,8 @@ tr:hover td{background:#fafafe}
 <div id="tab_jual" style="display:none">
   <div class="card">
     <div class="card-title">💵 Import Penjualan dari Google Sheet</div>
-    <div class="hint" style="margin:0 0 8px">Paste hasil baca nota dari Google Sheet. Kolom yang dibaca: <b>Tanggal</b>, <b>Pelanggan</b>, <b>Kota</b>, <b>No.Nota</b>, <b>Nama Barang</b>, <b>Qty</b>, <b>Sat</b>, <b>Harga</b>, <b>Subtotal</b>, dan <b>Status</b>. Baris judul yang berulang akan dilewati otomatis.</div>
-    <div class="field"><textarea id="jualTsv" class="mono" placeholder="Tanggal	Pelanggan	Kota	No.Nota	Nama Barang	Qty	Sat	Harga	Subtotal	Harga Master	Status&#10;07/07/2026	RAHMAN	PAMEKASAN		GARAM MERAH	25	kg	102500	2562500	105000	PIUTANG"></textarea></div>
+    <div class="hint" style="margin:0 0 8px">Paste hasil baca nota dari Google Sheet. Kolom yang dibaca: <b>Tanggal</b>, <b>Pelanggan</b>, <b>Kota</b>, <b>No.Nota</b>, <b>Nama Barang</b>, <b>Qty</b>, <b>Sat</b>, <b>Harga</b>, <b>Subtotal</b>, dan <b>Harga Master</b>. Baris judul yang berulang akan dilewati otomatis.</div>
+    <div class="field"><textarea id="jualTsv" class="mono" placeholder="Tanggal	Pelanggan	Kota	No.Nota	Nama Barang	Qty	Sat	Harga	Subtotal	Harga Master&#10;07/07/2026	RAHMAN	PAMEKASAN		GARAM MERAH	25	kg	102500	2562500	105000"></textarea></div>
     <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-line" onclick="parseJual()">🔍 Baca penjualan</button>
       <button class="btn btn-line" onclick="resetJualImport()">Reset</button>
@@ -342,9 +375,6 @@ tr:hover td{background:#fafafe}
     </div>
     <div class="filter-row">
       <input type="text" id="lapJualCari" placeholder="Cari pelanggan / kota / barang / no nota..." oninput="renderLaporanJual()">
-      <select id="lapJualStatus" onchange="renderLaporanJual()">
-        <option value="">Semua status</option>
-      </select>
     </div>
     <div class="filter-row">
       <label style="font-size:12px;color:#888;font-weight:600">📅 Tanggal:</label>
@@ -363,7 +393,6 @@ tr:hover td{background:#fafafe}
         <th class="r">Qty</th>
         <th class="r">Harga</th>
         <th class="r">Subtotal</th>
-        <th>Status</th>
         <th>Stok</th>
         <th style="width:96px"></th>
       </tr></thead>
@@ -515,7 +544,7 @@ tr:hover td{background:#fafafe}
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch }
+import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, getDocs }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // ===================== FIREBASE CONFIG (sama dengan app piutang) =====================
@@ -617,6 +646,45 @@ async function auditLog(action, detail={}){
   }
 }
 
+async function readCollectionSafe(name){
+  try {
+    const snap = await getDocs(collection(db, name));
+    return snap.docs.map(d=>({ id:d.id, ...d.data() }));
+  } catch(e) {
+    console.warn('Backup gagal membaca', name, e);
+    return { error: e.message };
+  }
+}
+
+window.exportBackup = async function(){
+  $('backupOk').style.display='none';
+  $('backupErr').style.display='none';
+  try {
+    const data = {
+      exportedAt: new Date().toISOString(),
+      projectId: firebaseConfig.projectId,
+      collections: {
+        [COLL]: await readCollectionSafe(COLL),
+        [SALES_COLL]: await readCollectionSafe(SALES_COLL),
+        [AUDIT_COLL]: await readCollectionSafe(AUDIT_COLL),
+        [ARCHIVE_COLL]: await readCollectionSafe(ARCHIVE_COLL)
+      }
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `backup-stok-${todayIso()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    URL.revokeObjectURL(a.href);
+    document.body.removeChild(a);
+    showMsg('backupOk','✔ Backup JSON berhasil dibuat.', 6000);
+    await auditLog('backup_export', { collections:Object.keys(data.collections) });
+  } catch(e){
+    showMsg('backupErr','Gagal membuat backup: '+e.message, 8000);
+  }
+};
+
 function drumStr(kg, isiDrum){
   if(!isiDrum || isiDrum <= 0 || kg === 0) return '';
   const neg = kg < 0; const a = Math.abs(kg);
@@ -699,6 +767,7 @@ function startListening(){
   const sq = query(collection(db, SALES_COLL), orderBy('tanggal'));
   unsubSales = onSnapshot(sq, snap => {
     sales = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if(curTab==='dash') renderDash();
     if(curTab==='lapjual') renderLaporanJual();
   }, err => {
     console.warn('Gagal membaca penjualan:', err);
@@ -806,7 +875,65 @@ function renderChips(){
   $('chips').innerHTML = html;
 }
 
+function renderSalesDashboard(){
+  if(!$('dashSalesSum')) return;
+  const today = todayIso();
+  const monthPrefix = today.slice(0,7);
+  const todaySales = sales.filter(s=>s.tanggal===today);
+  const monthSales = sales.filter(s=>String(s.tanggal||'').startsWith(monthPrefix));
+  const totalAll = sales.reduce((a,s)=>a+(parseFloat(s.subtotal)||0),0);
+  const totalToday = todaySales.reduce((a,s)=>a+(parseFloat(s.subtotal)||0),0);
+  const totalMonth = monthSales.reduce((a,s)=>a+(parseFloat(s.subtotal)||0),0);
+  const priceDiff = sales.filter(s=>s.hargaMaster && Math.abs(parseFloat(s.selisihHarga)||0) > 0);
+  $('dashSalesSum').innerHTML = `<span>Hari ini: <b>${rp(totalToday)}</b></span>
+    <span>Bulan ini: <b>${rp(totalMonth)}</b></span>
+    <span>Total tercatat: <b>${rp(totalAll)}</b></span>
+    <span>Baris penjualan: <b>${sales.length}</b></span>
+    <span>Harga beda master: <b>${priceDiff.length}</b></span>`;
+
+  const byCust = {};
+  sales.forEach(s=>{
+    const k = s.pelanggan || '(tanpa pelanggan)';
+    if(!byCust[k]) byCust[k] = 0;
+    byCust[k] += parseFloat(s.subtotal)||0;
+  });
+  const cust = Object.entries(byCust).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  $('dashSalesCust').innerHTML = cust.length
+    ? cust.map(([k,v])=>`<tr><td class="nama-cell">${esc(k)}</td><td class="r" style="font-weight:700">${rp(v)}</td></tr>`).join('')
+    : `<tr><td colspan="2" class="empty">Belum ada penjualan.</td></tr>`;
+
+  const byItem = {};
+  sales.forEach(s=>{
+    const k = s.namaBarang || s.namaNota || '(tanpa barang)';
+    if(!byItem[k]) byItem[k] = { qty:0, total:0, sat:s.sat||'' };
+    byItem[k].qty += parseFloat(s.qty)||0;
+    byItem[k].total += parseFloat(s.subtotal)||0;
+  });
+  const itemRows = Object.entries(byItem).sort((a,b)=>b[1].total-a[1].total).slice(0,8);
+  $('dashSalesItems').innerHTML = itemRows.length
+    ? itemRows.map(([k,v])=>`<tr><td class="nama-cell">${esc(k)}</td><td class="r">${num(v.qty)} ${esc(v.sat)}</td><td class="r" style="font-weight:700">${rp(v.total)}</td></tr>`).join('')
+    : `<tr><td colspan="3" class="empty">Belum ada penjualan.</td></tr>`;
+
+  const diffRows = priceDiff
+    .sort((a,b)=>Math.abs(parseFloat(b.selisihHarga)||0)-Math.abs(parseFloat(a.selisihHarga)||0))
+    .slice(0,10);
+  $('dashSalesPrice').innerHTML = diffRows.length
+    ? diffRows.map(s=>{
+      const d = parseFloat(s.selisihHarga)||0;
+      return `<tr>
+        <td>${isoToDisp(s.tanggal)}</td>
+        <td>${esc(s.pelanggan||'')}</td>
+        <td class="nama-cell">${esc(s.namaBarang||s.namaNota||'')}</td>
+        <td class="r">${rp(s.harga)}</td>
+        <td class="r">${rp(s.hargaMaster)}</td>
+        <td class="r ${d<0?'neg':'pos'}">${d>0?'+':''}${rp(d)}</td>
+      </tr>`;
+    }).join('')
+    : `<tr><td colspan="6" class="empty">Belum ada harga yang beda dari master.</td></tr>`;
+}
+
 function renderDash(){
+  renderSalesDashboard();
   // ---- Top movers ----
   const masuk = items.map(it=>({it, q:sumMut(it,'masuk')})).filter(x=>x.q>0).sort((a,b)=>b.q-a.q).slice(0,8);
   const keluar = items.map(it=>({it, q:sumMut(it,'keluar')})).filter(x=>x.q>0).sort((a,b)=>b.q-a.q).slice(0,8);
@@ -1297,7 +1424,6 @@ window.parseJual = function(){
   const iHarga = idxAny('harga jual','harga','price');
   const iSubtotal = idxAny('subtotal','sub total','total');
   const iHargaMaster = header.findIndex(h => h.includes('harga master'));
-  const iStatus = idxAny('status','pembayaran');
   if(iTgl < 0 || iPelanggan < 0 || iNama < 0 || iQty < 0 || iHarga < 0){
     showMsg('jualErr','Kolom wajib belum lengkap. Harus ada: Tanggal, Pelanggan, Nama Barang, Qty, dan Harga.', 9000);
     return;
@@ -1326,12 +1452,11 @@ window.parseJual = function(){
     const sat = iSat>=0 ? String(r[iSat]||'kg').trim() : 'kg';
     const subtotal = iSubtotal>=0 ? (parseHargaValue(r[iSubtotal]) || Math.round(qty * harga)) : Math.round(qty * harga);
     const hargaMasterSheet = iHargaMaster>=0 ? parseHargaValue(r[iHargaMaster]) : 0;
-    const status = iStatus>=0 ? String(r[iStatus]||'').trim() : '';
     const exact = findExact(namaRaw);
     const fuzzy = exact ? null : fuzzyFind(namaRaw);
     const match = exact || fuzzy;
     const row = {
-      tanggal, pelanggan, kota, noNota, namaRaw, qty, sat, harga, subtotal, status, hargaMasterSheet,
+      tanggal, pelanggan, kota, noNota, namaRaw, qty, sat, harga, subtotal, hargaMasterSheet,
       target: match ? match.nama : '', itemId: match ? match.id : '',
       fuzzy: !!fuzzy, invalidDate: !parsedDate.ok,
       rawTanggal: parsedDate.raw || String(r[iTgl]||'').trim()
@@ -1404,7 +1529,7 @@ function jualRowHtml(r, i){
     <td><input type="checkbox" id="jualC_${i}" ${r.checked?'checked':''} onchange="jualCheck(${i},this.checked)" style="width:15px;height:15px"></td>
     <td>${dateHtml}</td>
     <td style="color:#666;font-size:11.5px">${esc(r.pelanggan)}${r.kota?'<br><span style="color:#aaa">'+esc(r.kota)+'</span>':''}</td>
-    <td style="font-size:11.5px;color:#666">${esc(r.namaRaw)}${r.status?'<br><span style="color:#aaa">'+esc(r.status)+'</span>':''}</td>
+    <td style="font-size:11.5px;color:#666">${esc(r.namaRaw)}</td>
     <td><input class="${cls}" list="itemList" value="${esc(r.target)}" oninput="jualOnTarget(${i},this)" placeholder="Pilih barang stok..."></td>
     <td class="r">${num(r.qty)} ${esc(r.sat)}</td>
     <td class="r">${rp(r.harga)}</td>
@@ -1479,7 +1604,7 @@ window.doJualImport = async function(kurangiStok){
       batch.set(doc(collection(db, SALES_COLL)), {
         tanggal:r.tanggal, pelanggan:r.pelanggan, kota:r.kota, noNota:r.noNota,
         itemId:it.id, namaBarang:it.nama, namaNota:r.namaRaw,
-        qty:r.qty, sat:r.sat, harga:r.harga, subtotal:r.subtotal, status:r.status,
+        qty:r.qty, sat:r.sat, harga:r.harga, subtotal:r.subtotal,
         hargaMaster:r.hargaMaster||0, selisihHarga:r.selisihHarga||0,
         stockDeducted: !!kurangiStok,
         ref:r.ref, createdBy:userEmail(), createdAt:serverTimestamp()
@@ -1508,13 +1633,11 @@ window.doJualImport = async function(kurangiStok){
 
 function filteredSales(){
   const cari = $('lapJualCari') ? $('lapJualCari').value.trim().toLowerCase() : '';
-  const status = $('lapJualStatus') ? $('lapJualStatus').value : '';
   const dari = $('lapJualDari') ? $('lapJualDari').value : '';
   const sampai = $('lapJualSampai') ? $('lapJualSampai').value : '';
   let list = [...sales];
   if(dari) list = list.filter(s => String(s.tanggal||'') >= dari);
   if(sampai) list = list.filter(s => String(s.tanggal||'') <= sampai);
-  if(status) list = list.filter(s => String(s.status||'') === status);
   if(cari) list = list.filter(s =>
     String(s.pelanggan||'').toLowerCase().includes(cari) ||
     String(s.kota||'').toLowerCase().includes(cari) ||
@@ -1524,16 +1647,8 @@ function filteredSales(){
   return list;
 }
 
-function renderLaporanStatusOptions(){
-  const sel = $('lapJualStatus'); if(!sel) return;
-  const cur = sel.value;
-  const statuses = [...new Set(sales.map(s=>s.status).filter(Boolean))].sort();
-  sel.innerHTML = '<option value="">Semua status</option>' + statuses.map(s=>`<option value="${esc(s)}"${s===cur?' selected':''}>${esc(s)}</option>`).join('');
-}
-
 window.renderLaporanJual = function(){
   if(!$('lapJualBody')) return;
-  renderLaporanStatusOptions();
   const list = filteredSales();
   const total = list.reduce((s,x)=>s+(parseFloat(x.subtotal)||0),0);
   const qty = list.reduce((s,x)=>s+(parseFloat(x.qty)||0),0);
@@ -1545,7 +1660,7 @@ window.renderLaporanJual = function(){
     <span>Total jual: <b>${rp(total)}</b></span>
     <span>Sudah kurangi stok: <b>${stokDeducted}</b></span>`;
   if(!list.length){
-    $('lapJualBody').innerHTML = `<tr><td colspan="10" class="empty">${sales.length?'Tidak ada penjualan yang cocok dengan filter.':'Belum ada data penjualan.'}</td></tr>`;
+    $('lapJualBody').innerHTML = `<tr><td colspan="9" class="empty">${sales.length?'Tidak ada penjualan yang cocok dengan filter.':'Belum ada data penjualan.'}</td></tr>`;
     return;
   }
   $('lapJualBody').innerHTML = list.map(s => {
@@ -1558,7 +1673,6 @@ window.renderLaporanJual = function(){
       <td class="r">${num(s.qty)} ${esc(s.sat||'')}</td>
       <td class="r">${rp(s.harga)}</td>
       <td class="r" style="font-weight:700">${rp(s.subtotal)}</td>
-      <td>${esc(s.status||'')}</td>
       <td>${s.stockDeducted?'<span class="tag tag-keluar">keluar</span>':'<span class="tag">tidak</span>'}</td>
       <td style="white-space:nowrap">
         <button class="icon-btn" onclick="editSale('${s.id}')" title="Edit penjualan">✏️</button>
@@ -1577,11 +1691,11 @@ window.lapJualResetDate = function(){
 window.copyLaporanJual = function(){
   const list = filteredSales();
   if(!list.length){ alert('Tidak ada data laporan untuk dicopy.'); return; }
-  const header = ['Tanggal','Pelanggan','Kota','No Nota','Barang','Qty','Sat','Harga','Harga Master','Selisih Harga','Subtotal','Status','Stok Dikurangi'].join('\t');
+  const header = ['Tanggal','Pelanggan','Kota','No Nota','Barang','Qty','Sat','Harga','Harga Master','Selisih Harga','Subtotal','Stok Dikurangi'].join('\t');
   const rows = list.map(s => [
     isoToDisp(s.tanggal), s.pelanggan||'', s.kota||'', s.noNota||'', s.namaBarang||s.namaNota||'',
     String(s.qty||0).replace('.',','), s.sat||'', s.harga||0, s.hargaMaster||'', s.selisihHarga||'',
-    s.subtotal||0, s.status||'', s.stockDeducted?'YA':'TIDAK'
+    s.subtotal||0, s.stockDeducted?'YA':'TIDAK'
   ].join('\t'));
   const tsv = header + '\n' + rows.join('\n');
   navigator.clipboard.writeText(tsv).then(()=>showMsg('lapJualOk','✔ Laporan berhasil dicopy.'))
@@ -1642,20 +1756,19 @@ window.editSale = async function(id){
   const sat = prompt('Satuan:', s.sat||'kg'); if(sat === null) return;
   const harga = parseHargaValue(prompt('Harga jual:', s.harga ? String(s.harga) : ''));
   if(harga <= 0){ alert('Harga harus lebih dari 0.'); return; }
-  const status = prompt('Status:', s.status||''); if(status === null) return;
   const subtotal = Math.round(qty * harga);
   const hargaMaster = hargaOf(it);
   const updated = {
     ...s, tanggal:pd.iso, pelanggan:pelanggan.trim(), kota:kota.trim(), noNota:noNota.trim(),
     itemId:it.id, namaBarang:it.nama, qty, sat:(sat.trim()||'kg'), harga, subtotal,
-    status:status.trim(), hargaMaster, selisihHarga:hargaMaster ? harga - hargaMaster : 0
+    hargaMaster, selisihHarga:hargaMaster ? harga - hargaMaster : 0
   };
   try {
     const batch = writeBatch(db);
     batch.update(doc(db, SALES_COLL, id), {
       tanggal:updated.tanggal, pelanggan:updated.pelanggan, kota:updated.kota, noNota:updated.noNota,
       itemId:updated.itemId, namaBarang:updated.namaBarang, qty:updated.qty, sat:updated.sat,
-      harga:updated.harga, subtotal:updated.subtotal, status:updated.status,
+      harga:updated.harga, subtotal:updated.subtotal,
       hargaMaster:updated.hargaMaster, selisihHarga:updated.selisihHarga
     });
     await syncSaleMutation(batch, s, updated);
