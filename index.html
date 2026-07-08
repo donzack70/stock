@@ -236,9 +236,22 @@ tr:hover td{background:#fafafe}
     <div class="card-title">📦 Daftar Stok
       <span class="spacer"></span>
       <button class="btn btn-line btn-sm" onclick="toggleStokEdit()" id="stokEditBtn">✏️ Edit massal</button>
+      <button class="btn btn-line btn-sm" onclick="toggleHargaImp()" id="hImpToggle">💰 Import harga</button>
       <button class="btn btn-line btn-sm" onclick="toggleMasterImp()" id="mImpToggle">📥 Import master (paste)</button>
       <button class="btn btn-t btn-sm" onclick="openEdit(null)">➕ Tambah barang</button>
+      <button class="btn btn-line btn-sm" onclick="copyHargaTemplate()">📋 Template harga</button>
       <button class="btn btn-line btn-sm" onclick="copyStok()">📋 Copy ke Google Sheet</button>
+    </div>
+    <div id="hImpBody" style="display:none;border:1px dashed #d6eceb;border-radius:9px;padding:10px 12px;margin-bottom:10px;background:#f7fbfb">
+      <div class="hint" style="margin:0 0 6px">Paste tabel dari Excel/Google Sheet <b>termasuk baris judul</b>. Minimal harus ada kolom <b>Nama Barang</b> dan <b>Harga</b>. Boleh paste tabel lengkap seperti laporan stok, aplikasi akan ambil harga saja.</div>
+      <div class="field"><textarea id="hImpTsv" class="mono" placeholder="Nama Barang	Harga (Rp)&#10;NAPHTOL ASBS	Rp205,000&#10;ASG DIAL	Rp150,000"></textarea></div>
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-line btn-sm" onclick="parseHarga()">🔍 Periksa harga</button>
+        <span class="hint" style="margin:0">Baris yang namanya cocok akan diperbarui. Baris kategori seperti “— NAPHTOL —” otomatis dilewati.</span>
+      </div>
+      <div class="err-msg" id="hImpErr"></div>
+      <div id="hImpPrev" style="margin-top:8px"></div>
+      <div class="ok-msg" id="hImpOk"></div>
     </div>
     <div id="mImpBody" style="display:none;border:1px dashed #ddd;border-radius:9px;padding:10px 12px;margin-bottom:10px;background:#fafaf8">
       <div class="hint" style="margin:0 0 6px">Paste dari Excel/Google Sheet <b>termasuk baris judul</b>. Judul kolom yang dikenali: <b>Nama</b> (wajib), <b>Kategori</b>, <b>Sat</b>, <b>Isi/Drum</b>, <b>Harga</b> (opsional), dan stok awal boleh berjudul <b>Stok Awal / Stok / Total / Jumlah / Sisa</b>. Urutan kolom bebas — yang penting judulnya.</div>
@@ -918,6 +931,136 @@ window.stokSaveAll = async function(){
     alert('Gagal menyimpan: '+e.message);
     btn.disabled = false; btn.textContent = '💾 Coba lagi';
   }
+};
+
+// ===================== IMPORT HARGA =====================
+window.toggleHargaImp = function(){
+  const b = $('hImpBody'); const open = b.style.display !== 'none';
+  b.style.display = open ? 'none':'block';
+};
+
+let hargaParsed = [];
+
+function cleanHeader(h){
+  return String(h||'').toLowerCase().replace(/\s+/g,' ').replace(/[().]/g,'').trim();
+}
+
+function splitPasteLines(raw){
+  return raw.replace(/\r/g,'').split('\n')
+    .map(l => l.split('\t').map(c => String(c||'').trim()));
+}
+
+function parseHargaValue(v){
+  const digits = onlyDigits(v);
+  return digits ? parseInt(digits,10) : 0;
+}
+
+window.parseHarga = function(){
+  $('hImpErr').style.display='none';
+  $('hImpPrev').innerHTML=''; hargaParsed=[];
+  const raw = $('hImpTsv').value.trim();
+  if(!raw){ showMsg('hImpErr','Paste data harga dulu.'); return; }
+  const lines = splitPasteLines(raw).filter(r => r.some(c => c));
+  if(lines.length < 2){ showMsg('hImpErr','Data terlalu sedikit. Paste baris judul dan minimal 1 baris barang.', 6000); return; }
+  const header = lines[0].map(cleanHeader);
+  const findCol = (kandidat, hindari=[]) => header.findIndex(h =>
+    kandidat.some(k => h.includes(k)) && !hindari.some(k => h.includes(k)));
+  const iNama = findCol(['nama barang','nama produk','nama','barang','produk','item'], ['no']);
+  const iHarga = findCol(['harga','price','hrg']);
+  if(iNama < 0 || iHarga < 0){
+    showMsg('hImpErr','Kolom "Nama Barang" dan/atau "Harga" tidak ditemukan. Pastikan baris pertama adalah judul kolom.', 8000);
+    return;
+  }
+
+  let nCocok=0, nLewat=0, nTidak=0, nSama=0;
+  const seen = new Set();
+  for(let i=1;i<lines.length;i++){
+    const r = lines[i];
+    const nama = String(r[iNama]||'').trim();
+    const harga = parseHargaValue(r[iHarga]);
+    if(!nama || /^[-—\s]+/.test(nama) || !harga){ nLewat++; continue; }
+    const key = nama.toLowerCase();
+    if(seen.has(key)) continue;
+    seen.add(key);
+    const exact = findExact(nama);
+    const fuzzy = exact ? null : fuzzyFind(nama);
+    const it = exact || fuzzy;
+    if(!it){ nTidak++; hargaParsed.push({ nama, harga, target:null, fuzzy:false, checked:false }); continue; }
+    const sama = hargaOf(it) === harga;
+    if(sama) nSama++; else nCocok++;
+    hargaParsed.push({
+      nama, harga, target: it.nama, itemId: it.id, hargaLama: hargaOf(it),
+      fuzzy: !!fuzzy, checked: !!exact && !sama
+    });
+  }
+  if(!hargaParsed.length){ showMsg('hImpErr','Tidak ada baris harga yang bisa dibaca.', 6000); return; }
+
+  const contoh = hargaParsed.slice(0,12).map((p,i)=>`
+    <tr>
+      <td><input type="checkbox" id="hImpC_${i}" ${p.checked?'checked':''} ${!p.itemId || p.hargaLama===p.harga?'disabled':''} onchange="hargaCheck(${i},this.checked)" style="width:15px;height:15px"></td>
+      <td class="nama-cell">${esc(p.nama)}</td>
+      <td>${p.target ? esc(p.target) : '<span style="color:#c0392b;font-weight:700">Tidak ketemu</span>'} ${p.fuzzy?'<span class="tag tag-fuzzy">fuzzy</span>':''}</td>
+      <td class="r">${p.itemId ? rp(p.hargaLama) : '<span class="zero">-</span>'}</td>
+      <td class="r" style="font-weight:700">${rp(p.harga)}</td>
+    </tr>`).join('');
+
+  $('hImpPrev').innerHTML = `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+      <span class="tag" style="background:#e8f4f4;color:#0e7c7b">Nama: kolom ${iNama+1}</span>
+      <span class="tag" style="background:#e8f4f4;color:#0e7c7b">Harga: kolom ${iHarga+1}</span>
+      <span class="tag tag-masuk">${nCocok} siap update</span>
+      ${nSama?`<span class="tag">${nSama} harga sudah sama</span>`:''}
+      ${nTidak?`<span class="tag tag-dup">${nTidak} nama tidak ketemu</span>`:''}
+      ${nLewat?`<span class="tag">${nLewat} baris dilewati</span>`:''}
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th style="width:30px"></th><th>Nama di paste</th><th>Barang stok</th><th class="r">Harga lama</th><th class="r">Harga baru</th></tr></thead>
+      <tbody>${contoh}</tbody>
+    </table></div>
+    ${hargaParsed.length>12?`<div class="hint" style="margin-top:5px">Preview menampilkan 12 dari ${hargaParsed.length} baris terbaca.</div>`:''}
+    <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-t btn-sm" onclick="importHargaGo()" id="hImpBtn">💾 Update harga tercentang</button>
+      <span class="hint" style="margin:0">Baris fuzzy tidak dicentang otomatis supaya tidak salah barang.</span>
+    </div>`;
+};
+
+window.hargaCheck = function(i, checked){
+  if(hargaParsed[i]) hargaParsed[i].checked = checked;
+};
+
+window.importHargaGo = async function(){
+  const rows = hargaParsed.filter(p => p.checked && p.itemId && p.harga > 0 && p.harga !== p.hargaLama);
+  if(!rows.length){ showMsg('hImpErr','Tidak ada harga valid yang dicentang.', 5000); return; }
+  const btn = $('hImpBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
+  try {
+    let batch = writeBatch(db), n = 0;
+    for(const p of rows){
+      batch.update(doc(db, COLL, p.itemId), { harga: p.harga });
+      n++;
+      if(n >= 400){ await batch.commit(); batch = writeBatch(db); n = 0; }
+    }
+    if(n > 0) await batch.commit();
+    await auditLog('import_harga', { jumlah: rows.length });
+    showMsg('hImpOk', `✔ ${rows.length} harga berhasil diperbarui.`, 7000);
+    $('hImpTsv').value=''; $('hImpPrev').innerHTML=''; hargaParsed=[];
+  } catch(e){
+    showMsg('hImpErr','Gagal update harga: '+e.message, 8000);
+    btn.disabled = false; btn.textContent = '💾 Coba lagi';
+  }
+};
+
+window.copyHargaTemplate = function(){
+  if(!items.length){ alert('Belum ada barang.'); return; }
+  const rows = items.map(it => [it.nama, hargaOf(it) ? rp(hargaOf(it)) : ''].join('\t'));
+  const tsv = 'Nama Barang\tHarga (Rp)\n' + rows.join('\n');
+  navigator.clipboard.writeText(tsv).then(()=>showMsg('stokOk','✔ Template harga berhasil dicopy. Paste ke Google Sheet, isi harga, lalu import lagi.'))
+  .catch(()=>{
+    const ta = document.createElement('textarea');
+    ta.value = tsv; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    showMsg('stokOk','✔ Template harga berhasil dicopy.');
+  });
 };
 
 // ===================== IMPORT MASTER =====================
