@@ -714,7 +714,7 @@ function makeSaleRef(r){
 }
 
 function validJualRows(){
-  return jualRows.filter(r => r.checked && !r.invalidDate && findExact(r.target) && r.qty > 0 && r.harga > 0);
+  return jualRows.filter(r => r.checked && !r.dupSales && !r.invalidDate && findExact(r.target) && r.qty > 0 && r.harga > 0);
 }
 
 // ===================== MATCHING NAMA =====================
@@ -1283,9 +1283,10 @@ window.parseJual = function(){
     return;
   }
 
-  const existingRefs = new Set();
-  sales.forEach(s => { if(s.ref) existingRefs.add(s.ref); });
-  items.forEach(it => (it.mutasi||[]).forEach(m => { if(m.ref) existingRefs.add(m.ref); }));
+  const salesRefs = new Set();
+  const mutasiRefs = new Set();
+  sales.forEach(s => { if(s.ref) salesRefs.add(s.ref); });
+  items.forEach(it => (it.mutasi||[]).forEach(m => { if(m.ref) mutasiRefs.add(m.ref); }));
 
   for(let i=1;i<lines.length;i++){
     const r = lines[i]; if(r.length < 2) continue;
@@ -1315,13 +1316,18 @@ window.parseJual = function(){
     row.hargaMaster = match ? hargaOf(match) : hargaMasterSheet;
     row.selisihHarga = row.hargaMaster ? harga - row.hargaMaster : 0;
     row.ref = makeSaleRef(row);
-    row.dup = existingRefs.has(row.ref);
-    row.checked = !!exact && !row.dup && !row.invalidDate;
+    row.dupSales = salesRefs.has(row.ref);
+    row.dupMutasi = mutasiRefs.has(row.ref);
+    row.dup = row.dupSales || row.dupMutasi;
+    row.checked = !!exact && !row.dupSales && !row.dupMutasi && !row.invalidDate;
     jualRows.push(row);
   }
   if(!jualRows.length){ showMsg('jualErr','Tidak ada baris penjualan valid yang terbaca.', 6000); return; }
 
   const nDup = jualRows.filter(r=>r.dup).length;
+  const nDupSales = jualRows.filter(r=>r.dupSales).length;
+  const nDupMutasi = jualRows.filter(r=>r.dupMutasi).length;
+  const nMutasiOnly = jualRows.filter(r=>!r.dupSales && r.dupMutasi).length;
   const nBadDate = jualRows.filter(r=>r.invalidDate).length;
   const nNoMatch = jualRows.filter(r=>!r.target).length;
   const nFuzzy = jualRows.filter(r=>r.fuzzy).length;
@@ -1331,10 +1337,13 @@ window.parseJual = function(){
       <span class="tag tag-keluar" style="font-size:12px;padding:3px 12px">Terbaca ${jualRows.length} baris penjualan</span>
       <span class="tag tag-masuk">Siap simpan: ${jualRows.filter(r=>r.checked).length} baris · ${rp(total)}</span>
       ${nDup?`<span class="tag tag-dup">${nDup} kemungkinan duplikat</span>`:''}
+      ${nDupSales?`<span class="tag tag-dup">${nDupSales} sudah ada di laporan</span>`:''}
+      ${nDupMutasi?`<span class="tag tag-dup">${nDupMutasi} sudah ada di mutasi stok</span>`:''}
       ${nBadDate?`<span class="tag tag-dup">${nBadDate} tanggal tidak terbaca</span>`:''}
       ${nNoMatch?`<span class="tag tag-fuzzy">${nNoMatch} barang tidak ketemu</span>`:''}
       ${nFuzzy?`<span class="tag tag-fuzzy">${nFuzzy} cocok mirip, wajib cek</span>`:''}
     </div>
+    ${nMutasiOnly?`<div class="hint" style="margin:0 0 8px;color:#b7600a">Ada ${nMutasiOnly} baris yang sudah mengurangi stok lewat mutasi, tapi belum ada di laporan penjualan. Kalau ingin melengkapi laporan, centang baris itu lalu pakai <b>Simpan penjualan saja</b>.</div>`:''}
     <div class="tbl-wrap"><table class="prev-tbl">
       <thead><tr>
         <th style="width:30px"><input type="checkbox" onchange="jualToggleAll(this.checked)" style="width:15px;height:15px"></th>
@@ -1375,7 +1384,8 @@ function jualRowHtml(r, i){
     <td class="r">${r.hargaMaster?`${rp(r.hargaMaster)}${r.selisihHarga?`<br><span class="${r.selisihHarga<0?'neg':'pos'}">${r.selisihHarga>0?'+':''}${rp(r.selisihHarga)}</span>`:''}`:'<span class="zero">-</span>'}</td>
     <td class="r" style="font-weight:700">${rp(r.subtotal)}</td>
     <td style="font-size:10.5px">
-      ${r.dup?'<span class="tag tag-dup">duplikat?</span> ':''}
+      ${r.dupSales?'<span class="tag tag-dup">sudah di laporan</span> ':''}
+      ${r.dupMutasi?'<span class="tag tag-dup">sudah di mutasi</span> ':''}
       ${r.fuzzy?'<span class="tag tag-fuzzy">fuzzy</span>':''}
       ${r.invalidDate?'<span class="tag tag-dup">tanggal</span>':''}
       ${!r.target?'<span style="color:#b7600a">pilih</span>':''}
@@ -1399,7 +1409,7 @@ window.jualOnTarget = function(i, inp){
 
 window.jualToggleAll = function(v){
   jualRows.forEach((r,i)=>{
-    r.checked = v && !r.invalidDate && !r.dup && !!findExact(r.target);
+    r.checked = v && !r.invalidDate && !r.dupSales && !!findExact(r.target);
     const c=$('jualC_'+i); if(c) c.checked=r.checked;
   });
 };
@@ -1414,6 +1424,10 @@ window.resetJualImport = function(){
 window.doJualImport = async function(kurangiStok){
   const rows = validJualRows();
   if(!rows.length){ showMsg('jualErr','Tidak ada baris penjualan valid yang dicentang.', 5000); return; }
+  if(kurangiStok && rows.some(r=>r.dupMutasi)){
+    showMsg('jualErr','Ada baris tercentang yang sudah ada di mutasi stok. Pakai "Simpan penjualan saja" untuk melengkapi laporan, atau hilangkan centangnya.', 8000);
+    return;
+  }
   const btnOnly = $('jualOnlyBtn'), btnStock = $('jualStockBtn');
   if(btnOnly) btnOnly.disabled = true;
   if(btnStock) btnStock.disabled = true;
