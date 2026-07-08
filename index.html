@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -486,11 +487,33 @@ function validIsoDate(iso){
 }
 
 function parseImportDate(raw){
-  const s = String(raw ?? '').trim();
+  let s = String(raw ?? '').trim();
   if(!s) return { iso: todayIso(), ok: true, empty: true };
+  s = s.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ');
   if(/^\d{4}-\d{1,2}-\d{1,2}$/.test(s)){
     const [y,m,d] = s.split('-').map(Number);
     const iso = `${y}-${pad2(m)}-${pad2(d)}`;
+    return { iso, ok: validIsoDate(iso), empty: false };
+  }
+  const bulan = {
+    jan:1, januari:1, january:1,
+    feb:2, februari:2, february:2,
+    mar:3, maret:3, march:3,
+    apr:4, april:4,
+    mei:5, may:5,
+    jun:6, juni:6, june:6,
+    jul:7, juli:7, july:7,
+    agu:8, ags:8, agust:8, agustus:8, aug:8, august:8,
+    sep:9, sept:9, september:9,
+    okt:10, oktober:10, oct:10, october:10,
+    nov:11, november:11,
+    des:12, desember:12, dec:12, december:12
+  };
+  const mText = s.toLowerCase().match(/^(\d{1,2})[\s\-/.,]+([a-z]+)[\s\-/.,]+(\d{2,4})$/i);
+  if(mText && bulan[mText[2]]){
+    let y = parseInt(mText[3],10);
+    if(y < 100) y += 2000;
+    const iso = `${y}-${pad2(bulan[mText[2]])}-${pad2(parseInt(mText[1],10))}`;
     return { iso, ok: validIsoDate(iso), empty: false };
   }
   const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
