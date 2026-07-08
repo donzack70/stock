@@ -365,6 +365,7 @@ tr:hover td{background:#fafafe}
         <th class="r">Subtotal</th>
         <th>Status</th>
         <th>Stok</th>
+        <th style="width:96px"></th>
       </tr></thead>
       <tbody id="lapJualBody"></tbody>
     </table></div>
@@ -1503,7 +1504,7 @@ window.renderLaporanJual = function(){
     <span>Total jual: <b>${rp(total)}</b></span>
     <span>Sudah kurangi stok: <b>${stokDeducted}</b></span>`;
   if(!list.length){
-    $('lapJualBody').innerHTML = `<tr><td colspan="9" class="empty">${sales.length?'Tidak ada penjualan yang cocok dengan filter.':'Belum ada data penjualan.'}</td></tr>`;
+    $('lapJualBody').innerHTML = `<tr><td colspan="10" class="empty">${sales.length?'Tidak ada penjualan yang cocok dengan filter.':'Belum ada data penjualan.'}</td></tr>`;
     return;
   }
   $('lapJualBody').innerHTML = list.map(s => {
@@ -1518,6 +1519,10 @@ window.renderLaporanJual = function(){
       <td class="r" style="font-weight:700">${rp(s.subtotal)}</td>
       <td>${esc(s.status||'')}</td>
       <td>${s.stockDeducted?'<span class="tag tag-keluar">keluar</span>':'<span class="tag">tidak</span>'}</td>
+      <td style="white-space:nowrap">
+        <button class="icon-btn" onclick="editSale('${s.id}')" title="Edit penjualan">✏️</button>
+        <button class="icon-btn danger" onclick="deleteSale('${s.id}')" title="Hapus penjualan">✕</button>
+      </td>
     </tr>`;
   }).join('');
 };
@@ -1546,6 +1551,96 @@ window.copyLaporanJual = function(){
     document.execCommand('copy'); document.body.removeChild(ta);
     showMsg('lapJualOk','✔ Laporan berhasil dicopy.');
   });
+};
+
+function saleMutationFor(s, it){
+  return {
+    jenis:'keluar', tanggal:s.tanggal, qty:parseFloat(s.qty)||0, sat:s.sat||'kg',
+    pihak:s.pelanggan||'', noNota:s.noNota||'', ref:s.ref,
+    hargaJual:parseFloat(s.harga)||0, subtotal:parseFloat(s.subtotal)||0, sumber:'penjualan'
+  };
+}
+
+function removeSaleMutation(item, ref){
+  const arr = [...(item.mutasi||[])];
+  const idx = arr.findIndex(m => m.ref === ref);
+  if(idx >= 0) arr.splice(idx, 1);
+  return arr;
+}
+
+async function syncSaleMutation(batch, oldSale, newSale){
+  if(!oldSale.stockDeducted) return;
+  const oldItem = items.find(it => it.id === oldSale.itemId) || findExact(oldSale.namaBarang);
+  const newItem = items.find(it => it.id === newSale.itemId) || findExact(newSale.namaBarang);
+  if(!oldItem || !newItem) throw new Error('Barang stok untuk mutasi penjualan tidak ditemukan.');
+  const oldArr = removeSaleMutation(oldItem, oldSale.ref);
+  const newMut = saleMutationFor(newSale, newItem);
+  if(oldItem.id === newItem.id){
+    oldArr.push(newMut);
+    batch.update(doc(db, COLL, oldItem.id), { mutasi: oldArr });
+  } else {
+    batch.update(doc(db, COLL, oldItem.id), { mutasi: oldArr });
+    batch.update(doc(db, COLL, newItem.id), { mutasi: [...(newItem.mutasi||[]), newMut] });
+  }
+}
+
+window.editSale = async function(id){
+  const s = sales.find(x=>x.id===id); if(!s) return;
+  const tanggalIn = prompt('Tanggal penjualan:', isoToDisp(s.tanggal));
+  if(tanggalIn === null) return;
+  const pd = parseImportDate(tanggalIn);
+  if(!pd.ok){ alert('Tanggal tidak valid.'); return; }
+  const pelanggan = prompt('Pelanggan:', s.pelanggan||''); if(pelanggan === null) return;
+  const kota = prompt('Kota:', s.kota||''); if(kota === null) return;
+  const noNota = prompt('No nota:', s.noNota||''); if(noNota === null) return;
+  const barang = prompt('Barang stok:', s.namaBarang||s.namaNota||''); if(barang === null) return;
+  const it = findExact(barang);
+  if(!it){ alert(`Barang "${barang}" tidak ada di daftar stok. Pilih nama persis dari master barang.`); return; }
+  const qty = parseId(prompt('Qty:', String(s.qty||'').replace('.',',')));
+  if(qty <= 0){ alert('Qty harus lebih dari 0.'); return; }
+  const sat = prompt('Satuan:', s.sat||'kg'); if(sat === null) return;
+  const harga = parseHargaValue(prompt('Harga jual:', s.harga ? String(s.harga) : ''));
+  if(harga <= 0){ alert('Harga harus lebih dari 0.'); return; }
+  const status = prompt('Status:', s.status||''); if(status === null) return;
+  const subtotal = Math.round(qty * harga);
+  const hargaMaster = hargaOf(it);
+  const updated = {
+    ...s, tanggal:pd.iso, pelanggan:pelanggan.trim(), kota:kota.trim(), noNota:noNota.trim(),
+    itemId:it.id, namaBarang:it.nama, qty, sat:(sat.trim()||'kg'), harga, subtotal,
+    status:status.trim(), hargaMaster, selisihHarga:hargaMaster ? harga - hargaMaster : 0
+  };
+  try {
+    const batch = writeBatch(db);
+    batch.update(doc(db, SALES_COLL, id), {
+      tanggal:updated.tanggal, pelanggan:updated.pelanggan, kota:updated.kota, noNota:updated.noNota,
+      itemId:updated.itemId, namaBarang:updated.namaBarang, qty:updated.qty, sat:updated.sat,
+      harga:updated.harga, subtotal:updated.subtotal, status:updated.status,
+      hargaMaster:updated.hargaMaster, selisihHarga:updated.selisihHarga
+    });
+    await syncSaleMutation(batch, s, updated);
+    await batch.commit();
+    await auditLog('penjualan_edit', { id, pelanggan:updated.pelanggan, barang:updated.namaBarang, subtotal:updated.subtotal, stockDeducted:!!updated.stockDeducted });
+    showMsg('lapJualOk','✔ Penjualan berhasil diperbarui.', 5000);
+  } catch(e){ alert('Gagal edit penjualan: '+e.message); }
+};
+
+window.deleteSale = async function(id){
+  const s = sales.find(x=>x.id===id); if(!s) return;
+  const msg = `Hapus penjualan ${s.pelanggan||''} - ${s.namaBarang||s.namaNota||''} ${num(s.qty)} ${s.sat||''}?\n\n` +
+    (s.stockDeducted ? 'Mutasi stok keluar yang terkait juga akan dihapus.' : 'Stok tidak akan berubah karena penjualan ini tidak mengurangi stok.');
+  if(!confirm(msg)) return;
+  try {
+    const batch = writeBatch(db);
+    batch.delete(doc(db, SALES_COLL, id));
+    if(s.stockDeducted){
+      const it = items.find(x=>x.id===s.itemId) || findExact(s.namaBarang);
+      if(!it) throw new Error('Barang stok untuk menghapus mutasi tidak ditemukan.');
+      batch.update(doc(db, COLL, it.id), { mutasi: removeSaleMutation(it, s.ref) });
+    }
+    await batch.commit();
+    await auditLog('penjualan_hapus', { id, pelanggan:s.pelanggan||'', barang:s.namaBarang||'', subtotal:s.subtotal||0, stockDeducted:!!s.stockDeducted });
+    showMsg('lapJualOk','✔ Penjualan berhasil dihapus.', 5000);
+  } catch(e){ alert('Gagal hapus penjualan: '+e.message); }
 };
 
 // ===================== MODAL EDIT BARANG =====================
