@@ -175,6 +175,7 @@ tr:hover td{background:#fafafe}
 <div class="tabbar">
   <button class="tab-btn act" id="tb_dash" onclick="setTab('dash')">📊 Dashboard</button>
   <button class="tab-btn" id="tb_stok" onclick="setTab('stok')">📦 Stok</button>
+  <button class="tab-btn" id="tb_jual" onclick="setTab('jual')">💵 Penjualan</button>
   <button class="tab-btn" id="tb_imp" onclick="setTab('imp')">📋 Import Mutasi</button>
   <button class="tab-btn" id="tb_mutasi" onclick="setTab('mutasi')">🧾 Semua Mutasi</button>
   <button class="tab-btn" id="tb_fisik" onclick="setTab('fisik')">✏️ Hitung Fisik</button>
@@ -312,6 +313,21 @@ tr:hover td{background:#fafafe}
     </div>
 
     <div class="ok-msg" id="stokOk">✔ Berhasil dicopy! Langsung paste (Ctrl+V) di Google Sheet.</div>
+  </div>
+</div>
+
+<!-- ====== PENJUALAN ====== -->
+<div id="tab_jual" style="display:none">
+  <div class="card">
+    <div class="card-title">💵 Import Penjualan dari Google Sheet</div>
+    <div class="hint" style="margin:0 0 8px">Paste hasil baca nota dari Google Sheet. Kolom yang dibaca: <b>Tanggal</b>, <b>Pelanggan</b>, <b>Kota</b>, <b>No.Nota</b>, <b>Nama Barang</b>, <b>Qty</b>, <b>Sat</b>, <b>Harga</b>, <b>Subtotal</b>, dan <b>Status</b>. Baris judul yang berulang akan dilewati otomatis.</div>
+    <div class="field"><textarea id="jualTsv" class="mono" placeholder="Tanggal	Pelanggan	Kota	No.Nota	Nama Barang	Qty	Sat	Harga	Subtotal	Harga Master	Status&#10;07/07/2026	RAHMAN	PAMEKASAN		GARAM MERAH	25	kg	102500	2562500	105000	PIUTANG"></textarea></div>
+    <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-line" onclick="parseJual()">🔍 Baca penjualan</button>
+      <span class="hint" style="margin:0">Saat disimpan, penjualan masuk laporan dan stok otomatis berkurang.</span>
+    </div>
+    <div class="err-msg" id="jualErr"></div>
+    <div id="jualPreview" style="margin-top:10px"></div>
   </div>
 </div>
 
@@ -472,6 +488,7 @@ const firebaseConfig = {
 const COLL = 'stok_items'; // koleksi khusus app ini — terpisah dari 'transaksi'
 const AUDIT_COLL = 'stok_audit_logs';
 const ARCHIVE_COLL = 'stok_opname_archives';
+const SALES_COLL = 'stok_penjualan';
 
 // ===================== HELPERS =====================
 const $ = id => document.getElementById(id);
@@ -577,6 +594,7 @@ let curTab = 'dash';
 let fltMinusOn = false, fisBelumOn = false;
 let editDocId = null, histDocId = null;
 let importRows = [];
+let jualRows = [];
 let importJenis = 'keluar';         // pilihan manual masuk/keluar
 let fisikDraft = {};
 let stokEditMode = false;
@@ -635,11 +653,19 @@ function startListening(){
   });
 }
 
+function normalizeName(s){
+  return String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
+}
+
+function makeSaleRef(r){
+  return ['jual', r.tanggal, r.noNota||'', r.pelanggan||'', r.namaRaw||'', r.qty, r.harga].join('|').toLowerCase();
+}
+
 // ===================== MATCHING NAMA =====================
 function findExact(nama){
   if(!nama) return null;
-  const n = nama.trim().toLowerCase();
-  return items.find(it => it.nama.toLowerCase() === n) || null;
+  const n = normalizeName(nama);
+  return items.find(it => normalizeName(it.nama) === n) || null;
 }
 function trigrams(s){ const set=new Set(); const p=' '+s+' '; for(let i=0;i<p.length-2;i++) set.add(p.slice(i,i+3)); return set; }
 function similarity(a,b){ const ta=trigrams(a), tb=trigrams(b); let c=0; ta.forEach(t=>{if(tb.has(t))c++;}); return (2*c)/(ta.size+tb.size); }
@@ -661,7 +687,7 @@ function fuzzyFind(nama){
 // ===================== TABS & RENDER =====================
 window.setTab = function(t){
   curTab = t;
-  ['dash','stok','imp','mutasi','fisik'].forEach(x => {
+  ['dash','stok','jual','imp','mutasi','fisik'].forEach(x => {
     $('tb_'+x).className = 'tab-btn' + (x===t?' act':'');
     $('tab_'+x).style.display = x===t ? 'block':'none';
   });
@@ -1169,6 +1195,186 @@ window.importMasterGo = async function(){
     $('mImpTsv').value=''; $('mImpPrev').innerHTML=''; masterParsed=[];
   } catch(e){
     showMsg('mImpErr','Gagal: '+e.message, 8000);
+    btn.disabled = false; btn.textContent = '💾 Coba lagi';
+  }
+};
+
+// ===================== IMPORT PENJUALAN =====================
+window.parseJual = function(){
+  $('jualErr').style.display='none';
+  $('jualPreview').innerHTML=''; jualRows=[];
+  if(!items.length){ showMsg('jualErr','Daftar stok masih kosong — import master barang dulu di tab 📦 Stok.', 7000); return; }
+  const raw = $('jualTsv').value.trim();
+  if(!raw){ showMsg('jualErr','Paste data penjualan dulu.'); return; }
+  const lines = splitPasteLines(raw).filter(r => r.some(c => c));
+  if(lines.length < 2){ showMsg('jualErr','Data terlalu sedikit. Paste baris judul dan minimal 1 baris penjualan.', 6000); return; }
+  const header = lines[0].map(cleanHeader);
+  const idxAny = (...names) => header.findIndex(h => names.some(n => h === n || h.includes(n)));
+  const iTgl = idxAny('tanggal','tgl','date');
+  const iPelanggan = idxAny('pelanggan','customer','pembeli');
+  const iKota = idxAny('kota','city');
+  const iNota = idxAny('no.nota','no nota','nonota','nota','invoice','faktur');
+  const iNama = idxAny('nama barang','nama','barang','produk','item');
+  const iQty = idxAny('qty','jumlah','qnt','quantity');
+  const iSat = idxAny('sat','satuan','unit');
+  const iHarga = idxAny('harga jual','harga','price');
+  const iSubtotal = idxAny('subtotal','sub total','total');
+  const iStatus = idxAny('status','pembayaran');
+  if(iTgl < 0 || iPelanggan < 0 || iNama < 0 || iQty < 0 || iHarga < 0){
+    showMsg('jualErr','Kolom wajib belum lengkap. Harus ada: Tanggal, Pelanggan, Nama Barang, Qty, dan Harga.', 9000);
+    return;
+  }
+
+  const existingRefs = new Set();
+  items.forEach(it => (it.mutasi||[]).forEach(m => { if(m.ref) existingRefs.add(m.ref); }));
+
+  for(let i=1;i<lines.length;i++){
+    const r = lines[i]; if(r.length < 2) continue;
+    if(cleanHeader(r[iTgl]) === 'tanggal' || cleanHeader(r[iNama]) === 'nama barang') continue;
+    const namaRaw = String(r[iNama]||'').trim();
+    const qty = parseId(r[iQty]);
+    const harga = parseHargaValue(r[iHarga]);
+    if(!namaRaw || qty <= 0 || harga <= 0) continue;
+    const parsedDate = parseImportDate(r[iTgl]);
+    const tanggal = parsedDate.iso;
+    const pelanggan = String(r[iPelanggan]||'').trim();
+    const kota = iKota>=0 ? String(r[iKota]||'').trim() : '';
+    const noNota = iNota>=0 ? String(r[iNota]||'').trim() : '';
+    const sat = iSat>=0 ? String(r[iSat]||'kg').trim() : 'kg';
+    const subtotal = iSubtotal>=0 ? (parseHargaValue(r[iSubtotal]) || Math.round(qty * harga)) : Math.round(qty * harga);
+    const status = iStatus>=0 ? String(r[iStatus]||'').trim() : '';
+    const exact = findExact(namaRaw);
+    const fuzzy = exact ? null : fuzzyFind(namaRaw);
+    const match = exact || fuzzy;
+    const row = {
+      tanggal, pelanggan, kota, noNota, namaRaw, qty, sat, harga, subtotal, status,
+      target: match ? match.nama : '', itemId: match ? match.id : '',
+      fuzzy: !!fuzzy, invalidDate: !parsedDate.ok,
+      rawTanggal: parsedDate.raw || String(r[iTgl]||'').trim()
+    };
+    row.ref = makeSaleRef(row);
+    row.dup = existingRefs.has(row.ref);
+    row.checked = !!exact && !row.dup && !row.invalidDate;
+    jualRows.push(row);
+  }
+  if(!jualRows.length){ showMsg('jualErr','Tidak ada baris penjualan valid yang terbaca.', 6000); return; }
+
+  const nDup = jualRows.filter(r=>r.dup).length;
+  const nBadDate = jualRows.filter(r=>r.invalidDate).length;
+  const nNoMatch = jualRows.filter(r=>!r.target).length;
+  const nFuzzy = jualRows.filter(r=>r.fuzzy).length;
+  const total = jualRows.filter(r=>r.checked).reduce((s,r)=>s+r.subtotal,0);
+  $('jualPreview').innerHTML = `
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <span class="tag tag-keluar" style="font-size:12px;padding:3px 12px">Terbaca ${jualRows.length} baris penjualan</span>
+      <span class="tag tag-masuk">Siap simpan: ${jualRows.filter(r=>r.checked).length} baris · ${rp(total)}</span>
+      ${nDup?`<span class="tag tag-dup">${nDup} kemungkinan duplikat</span>`:''}
+      ${nBadDate?`<span class="tag tag-dup">${nBadDate} tanggal tidak terbaca</span>`:''}
+      ${nNoMatch?`<span class="tag tag-fuzzy">${nNoMatch} barang tidak ketemu</span>`:''}
+      ${nFuzzy?`<span class="tag tag-fuzzy">${nFuzzy} cocok mirip, wajib cek</span>`:''}
+    </div>
+    <div class="tbl-wrap"><table class="prev-tbl">
+      <thead><tr>
+        <th style="width:30px"><input type="checkbox" onchange="jualToggleAll(this.checked)" style="width:15px;height:15px"></th>
+        <th style="width:78px">Tanggal</th>
+        <th>Pelanggan</th>
+        <th>Nama di nota</th>
+        <th style="min-width:200px">→ Barang stok</th>
+        <th class="r">Qty</th>
+        <th class="r">Harga</th>
+        <th class="r">Subtotal</th>
+        <th style="width:100px"></th>
+      </tr></thead>
+      <tbody>${jualRows.map((r,i)=>jualRowHtml(r,i)).join('')}</tbody>
+    </table></div>
+    <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-t" onclick="doJualImport()" id="jualGoBtn">💾 Simpan penjualan & kurangi stok</button>
+      <span class="hint" style="margin:0">Harga disimpan per transaksi. Master harga barang tidak diubah.</span>
+    </div>
+    <div class="ok-msg" id="jualOk"></div>`;
+};
+
+function jualRowHtml(r, i){
+  const cls = r.target ? (r.fuzzy ? 'warn' : 'ok') : 'warn';
+  const dateHtml = r.invalidDate
+    ? `<span style="color:#c0392b;font-weight:700">Tanggal salah</span><br><span style="color:#aaa">${esc(r.rawTanggal||'-')}</span>`
+    : isoToDisp(r.tanggal);
+  return `<tr>
+    <td><input type="checkbox" id="jualC_${i}" ${r.checked?'checked':''} onchange="jualCheck(${i},this.checked)" style="width:15px;height:15px"></td>
+    <td>${dateHtml}</td>
+    <td style="color:#666;font-size:11.5px">${esc(r.pelanggan)}${r.kota?'<br><span style="color:#aaa">'+esc(r.kota)+'</span>':''}</td>
+    <td style="font-size:11.5px;color:#666">${esc(r.namaRaw)}${r.status?'<br><span style="color:#aaa">'+esc(r.status)+'</span>':''}</td>
+    <td><input class="${cls}" list="itemList" value="${esc(r.target)}" oninput="jualOnTarget(${i},this)" placeholder="Pilih barang stok..."></td>
+    <td class="r">${num(r.qty)} ${esc(r.sat)}</td>
+    <td class="r">${rp(r.harga)}</td>
+    <td class="r" style="font-weight:700">${rp(r.subtotal)}</td>
+    <td style="font-size:10.5px">
+      ${r.dup?'<span class="tag tag-dup">duplikat?</span> ':''}
+      ${r.fuzzy?'<span class="tag tag-fuzzy">fuzzy</span>':''}
+      ${r.invalidDate?'<span class="tag tag-dup">tanggal</span>':''}
+      ${!r.target?'<span style="color:#b7600a">pilih</span>':''}
+    </td>
+  </tr>`;
+}
+
+window.jualCheck = function(i, checked){
+  if(jualRows[i]) jualRows[i].checked = checked;
+};
+
+window.jualOnTarget = function(i, inp){
+  const exact = findExact(inp.value);
+  jualRows[i].target = inp.value;
+  jualRows[i].itemId = exact ? exact.id : '';
+  jualRows[i].fuzzy = false;
+  inp.className = exact ? 'ok' : 'warn';
+};
+
+window.jualToggleAll = function(v){
+  jualRows.forEach((r,i)=>{
+    r.checked = v && !r.invalidDate && !r.dup && !!findExact(r.target);
+    const c=$('jualC_'+i); if(c) c.checked=r.checked;
+  });
+};
+
+window.doJualImport = async function(){
+  const rows = jualRows.filter(r => r.checked && !r.invalidDate && findExact(r.target) && r.qty > 0 && r.harga > 0);
+  if(!rows.length){ showMsg('jualErr','Tidak ada baris penjualan valid yang dicentang.', 5000); return; }
+  const btn = $('jualGoBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
+  try {
+    const byItem = {};
+    rows.forEach(r => {
+      const it = findExact(r.target);
+      if(!byItem[it.id]) byItem[it.id] = { it, add: [] };
+      byItem[it.id].add.push({
+        jenis:'keluar', tanggal:r.tanggal, qty:r.qty, sat:r.sat,
+        pihak:r.pelanggan, noNota:r.noNota, ref:r.ref,
+        hargaJual:r.harga, subtotal:r.subtotal, sumber:'penjualan'
+      });
+    });
+    let batch = writeBatch(db), n = 0;
+    for(const r of rows){
+      const it = findExact(r.target);
+      batch.set(doc(collection(db, SALES_COLL)), {
+        tanggal:r.tanggal, pelanggan:r.pelanggan, kota:r.kota, noNota:r.noNota,
+        itemId:it.id, namaBarang:it.nama, namaNota:r.namaRaw,
+        qty:r.qty, sat:r.sat, harga:r.harga, subtotal:r.subtotal, status:r.status,
+        ref:r.ref, createdBy:userEmail(), createdAt:serverTimestamp()
+      });
+      n++;
+    }
+    for(const id of Object.keys(byItem)){
+      const { it, add } = byItem[id];
+      batch.update(doc(db, COLL, id), { mutasi: [...(it.mutasi||[]), ...add] });
+      n++;
+    }
+    await batch.commit();
+    const total = rows.reduce((s,r)=>s+r.subtotal,0);
+    await auditLog('import_penjualan', { jumlah: rows.length, total, barang: Object.keys(byItem).length });
+    showMsg('jualOk', `✔ ${rows.length} baris penjualan disimpan. Total ${rp(total)}. Stok sudah dikurangi.`, 8000);
+    $('jualTsv').value='';
+    setTimeout(()=>{ $('jualPreview').innerHTML=''; jualRows=[]; }, 2500);
+  } catch(e){
+    showMsg('jualErr','Gagal menyimpan penjualan: '+e.message, 8000);
     btn.disabled = false; btn.textContent = '💾 Coba lagi';
   }
 };
