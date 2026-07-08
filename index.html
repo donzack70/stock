@@ -344,7 +344,6 @@ tr:hover td{background:#fafafe}
       <input type="date" id="mutDari" onchange="mutFilterChanged()" title="Dari tanggal">
       <span style="color:#aaa;font-size:12px">s/d</span>
       <input type="date" id="mutSampai" onchange="mutFilterChanged()" title="Sampai tanggal">
-      <button class="flt-btn" onclick="mutHariIni()">Hari ini</button>
       <button class="flt-btn" onclick="mutResetDate()">Reset tanggal</button>
       <span style="flex:1"></span>
       <label style="font-size:12px;color:#888">Tampil:</label>
@@ -355,7 +354,7 @@ tr:hover td{background:#fafafe}
         <option value="99999">Semua</option>
       </select>
     </div>
-    <div class="hint" style="margin:0 0 8px">Isi <b>Dari</b> saja = dari tanggal itu ke depan · isi <b>Sampai</b> saja = sampai tanggal itu · isi keduanya = rentang · klik "Hari ini" untuk satu hari. Ubah nilai lalu klik 💾 di baris itu; ganti kolom <b>Barang</b> untuk memindah mutasi. Klik ✕ untuk hapus.</div>
+    <div class="hint" style="margin:0 0 8px">Isi <b>Dari</b> saja = dari tanggal itu ke depan · isi <b>Sampai</b> saja = sampai tanggal itu · isi keduanya = rentang · isi keduanya dengan tanggal yang sama = satu hari. Ubah nilai lalu klik 💾 di baris itu; ganti kolom <b>Barang</b> untuk memindah mutasi. Klik ✕ untuk hapus.</div>
     <div class="mut-sum" id="mutSum"></div>
     <div class="tbl-wrap"><table>
       <thead><tr>
@@ -415,7 +414,7 @@ tr:hover td{background:#fafafe}
       <div class="field"><label>Satuan</label><input type="text" id="eSat" placeholder="kg"></div>
       <div class="field"><label>Isi per drum (dalam satuan) — 0 jika tanpa drum</label><input type="text" inputmode="decimal" id="eIsiDrum" placeholder="cth: 25"></div>
       <div class="field"><label>Stok awal periode</label><input type="text" inputmode="decimal" id="eAwal" placeholder="cth: 110"></div>
-      <div class="field"><label>Harga per satuan (Rp) — opsional</label><input type="text" inputmode="decimal" id="eHarga" placeholder="cth: 42000"></div>
+      <div class="field"><label>Harga per satuan (Rp) — opsional</label><input type="text" inputmode="numeric" id="eHarga" placeholder="cth: 42.000" oninput="this.value=grpRibuG(this.value)"></div>
     </div>
     <div class="hint" id="eDrumHint"></div>
     <div class="err-msg" id="eErr"></div>
@@ -465,6 +464,10 @@ const pad2 = n => String(n).padStart(2,'0');
 const num = v => { const n = Math.round((parseFloat(v)||0)*100)/100; return n.toLocaleString('id-ID',{maximumFractionDigits:2}); };
 const rpNum = v => Math.round(parseFloat(v)||0).toLocaleString('id-ID');
 const rp = v => 'Rp ' + rpNum(v);
+// Pemisah ribuan untuk input harga: simpan angka polos, tampilkan dengan titik ribuan (format Indonesia)
+const onlyDigits = s => String(s ?? '').replace(/[^\d]/g,'');
+const grpRibu = d => { const x = onlyDigits(d); return x ? parseInt(x,10).toLocaleString('id-ID') : ''; };
+window.grpRibuG = grpRibu; window.onlyDigitsG = onlyDigits;
 const parseId = v => { let s = String(v ?? '').trim(); if(!s) return 0;
   if(s.includes(',')) s = s.replace(/\./g,'').replace(',','.');
   return parseFloat(s.replace(/[^0-9.\-]/g,'')) || 0; };
@@ -773,7 +776,7 @@ function renderStokEdit(){
       <td><input class="edit-inp" value="${esc(d.sat)}" oninput="stokEditChange('${it.id}','sat',this.value)"></td>
       <td><input class="edit-inp r" inputmode="decimal" value="${esc(d.isiDrum)}" oninput="stokEditChange('${it.id}','isiDrum',this.value)"></td>
       <td><input class="edit-inp r" inputmode="decimal" value="${esc(d.stokAwal)}" oninput="stokEditChange('${it.id}','stokAwal',this.value)"></td>
-      <td><input class="edit-inp r" inputmode="decimal" value="${esc(d.harga)}" oninput="stokEditChange('${it.id}','harga',this.value)"></td>
+      <td><input class="edit-inp r" inputmode="numeric" value="${esc(grpRibu(d.harga))}" oninput="stokHargaInput(this,'${it.id}')"></td>
       <td class="r"><span id="sedot_${it.id}" style="color:#b7600a;font-weight:700;visibility:hidden">●</span></td>
     </tr>`;
   }).join('');
@@ -789,6 +792,12 @@ window.stokEditChange = function(id, field, val){
   const row = $('serow_'+id);
   if(row){ const changed = stokRowChanged(it); row.querySelectorAll('.edit-inp').forEach(inp=>inp.classList.toggle('changed', changed)); }
   updateStokEditBar();
+};
+
+window.stokHargaInput = function(el, id){
+  const digits = onlyDigits(el.value);
+  el.value = grpRibu(digits);        // tampilkan dengan titik ribuan
+  stokEditChange(id, 'harga', digits); // simpan angka polos
 };
 
 function updateStokEditBar(){
@@ -870,7 +879,7 @@ window.parseMaster = function(){
       kat:  iKat>=0  ? String(r[iKat]||'').trim() : '',
       sat: (iSat>=0  ? String(r[iSat]||'').trim() : '') || 'kg',
       isiDrum: iIsi>=0  ? parseId(r[iIsi])  : 0,
-      harga: iHarga>=0 ? parseId(r[iHarga]) : 0,
+      harga: iHarga>=0 ? (parseInt(onlyDigits(r[iHarga]))||0) : 0,
       stokAwal: iAwal>=0 ? parseId(r[iAwal]) : 0
     });
   }
@@ -948,7 +957,7 @@ window.openEdit = function(id){
     const it = items.find(x=>x.id===id); if(!it) return;
     $('emTitle').textContent = '✏️ Ubah Barang';
     $('eNama').value = it.nama; $('eKat').value = it.kat||''; $('eSat').value = it.sat||'kg';
-    $('eIsiDrum').value = it.isiDrum||''; $('eAwal').value = it.stokAwal||''; $('eHarga').value = it.harga||'';
+    $('eIsiDrum').value = it.isiDrum||''; $('eAwal').value = it.stokAwal||''; $('eHarga').value = it.harga?grpRibu(it.harga):'';
     $('eDelBtn').style.display = 'inline-block';
     const isi = parseFloat(it.isiDrum)||0;
     $('eDrumHint').textContent = isi>0 ? `Contoh: teoritis saat ini ${num(teoritisOf(it))} ${it.sat||'kg'} = ${drumStr(teoritisOf(it),isi)}` : '';
@@ -970,7 +979,7 @@ window.saveEdit = async function(){
   if(dupe){ showMsg('eErr','Nama barang ini sudah ada.'); return; }
   const payload = {
     nama, kat: $('eKat').value.trim(), sat: $('eSat').value.trim()||'kg',
-    isiDrum: parseId($('eIsiDrum').value), stokAwal: parseId($('eAwal').value), harga: parseId($('eHarga').value)
+    isiDrum: parseId($('eIsiDrum').value), stokAwal: parseId($('eAwal').value), harga: parseInt(onlyDigits($('eHarga').value))||0
   };
   const btn = $('eSaveBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
   try {
@@ -1169,7 +1178,6 @@ function allMutasi(){
 
 window.mutFilterChanged = function(){ mutPage = 1; renderMutasi(); };
 window.mutResetDate = function(){ $('mutDari').value=''; $('mutSampai').value=''; mutPage=1; renderMutasi(); };
-window.mutHariIni = function(){ const t = new Date().toISOString().slice(0,10); $('mutDari').value=t; $('mutSampai').value=t; mutPage=1; renderMutasi(); };
 window.mutGoPage = function(p){ mutPage = p; renderMutasi(); };
 
 window.renderMutasi = function(){
