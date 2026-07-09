@@ -163,7 +163,7 @@ let sales = [];
 let saleImports = [];
 let curTab = 'dash';
 let fltMinusOn = false, fisBelumOn = false, fltTerjualOn = false, fltBelumTerjualOn = false;
-let editDocId = null, histDocId = null, saleEditId = null, saleCreateMutation = null;
+let editDocId = null, histDocId = null, histMutEdit = null, saleEditId = null, saleCreateMutation = null;
 let importRows = [];
 let jualRows = [];
 let lastSaleImport = null;
@@ -1773,7 +1773,11 @@ window.openHist = function(id){
   refreshHist();
   $('histModal').classList.add('show');
 };
-window.closeHist = function(){ histDocId=null; $('histModal').classList.remove('show'); };
+window.closeHist = function(){
+  closeHistMutEdit();
+  histDocId=null;
+  $('histModal').classList.remove('show');
+};
 
 function refreshHist(){
   const it = items.find(x=>x.id===histDocId); if(!it){ closeHist(); return; }
@@ -1786,18 +1790,57 @@ function refreshHist(){
         <span class="tag ${m.jenis==='masuk'?'tag-masuk':'tag-keluar'}">${m.jenis==='masuk'?'MASUK':'KELUAR'}</span>
         <span style="font-weight:600">${num(m.qty)} ${esc(m.sat||'')}</span>
         <span style="color:#888;flex:1">${esc(m.pihak||'')} ${m.noNota?'· '+esc(m.noNota):''}</span>
+        <button class="icon-btn" onclick="openHistMutEdit(${m._i})" title="Edit mutasi">✏️</button>
         <button class="icon-btn danger" onclick="delMutasi(${m._i})">✕</button>
       </div>`).join('')
     : `<div class="hist-row" style="color:#bbb">Belum ada mutasi untuk barang ini.</div>`;
 }
 
+window.openHistMutEdit = function(idx){
+  const it = items.find(x=>x.id===histDocId), m = it && (it.mutasi||[])[idx];
+  if(!it || !m) return;
+  const linked = linkedSaleForMutation(m,it.nama);
+  histMutEdit = { itemId:it.id, idx };
+  $('histMutErr').style.display='none';
+  $('histMutSub').textContent = linked
+    ? `Terhubung ke penjualan ${linked.pelanggan||''}. Perubahan barang, tanggal, qty, pihak, dan nota akan diterapkan juga ke laporan penjualan.`
+    : 'Mutasi ini belum terhubung ke laporan penjualan.';
+  $('hmJenis').value = m.jenis||'keluar';
+  $('hmJenis').disabled = !!linked;
+  $('hmTanggal').value = m.tanggal||todayIso();
+  $('hmBarang').value = it.nama;
+  $('hmQty').value = String(m.qty||'').replace('.',',');
+  $('hmPihak').value = m.pihak||'';
+  $('hmNota').value = m.noNota||'';
+  $('histMutModal').classList.add('show');
+};
+
+window.closeHistMutEdit = function(){
+  histMutEdit=null;
+  if($('hmJenis')) $('hmJenis').disabled=false;
+  if($('histMutModal')) $('histMutModal').classList.remove('show');
+};
+
+window.saveHistMutEdit = async function(){
+  if(!histMutEdit) return;
+  $('histMutErr').style.display='none';
+  const tanggal=$('hmTanggal').value;
+  if(!validIsoDate(tanggal)){ showMsg('histMutErr','Tanggal tidak valid.',5000); return; }
+  const barang=$('hmBarang').value.trim();
+  if(!findExact(barang)){ showMsg('histMutErr','Barang tidak ditemukan. Pilih nama persis dari daftar.',6000); return; }
+  const qty=parseId($('hmQty').value);
+  if(qty<=0){ showMsg('histMutErr','Qty harus lebih dari 0.',5000); return; }
+  const d={
+    jenis:$('hmJenis').value, tanggal, barang, qty,
+    pihak:$('hmPihak').value, noNota:$('hmNota').value
+  };
+  await saveMutationChange(histMutEdit.itemId,histMutEdit.idx,d,$('histMutSaveBtn'));
+  if($('histMutSaveBtn')){ $('histMutSaveBtn').disabled=false; $('histMutSaveBtn').textContent='Simpan'; }
+};
+
 window.delMutasi = async function(i){
-  const it = items.find(x=>x.id===histDocId); if(!it) return;
-  const m = (it.mutasi||[])[i]; if(!m) return;
-  if(!confirm(`Hapus mutasi ${m.jenis} ${num(m.qty)} tanggal ${isoToDisp(m.tanggal)}?`)) return;
-  const mutasi = (it.mutasi||[]).filter((_,x)=>x!==i);
-  try { await updateDoc(doc(db, COLL, it.id), { mutasi }); await auditLog('mutasi_hapus_riwayat', { barang: it.nama, jenis: m.jenis, qty: m.qty, tanggal: m.tanggal }); setTimeout(refreshHist, 400); }
-  catch(e){ alert('Gagal: '+e.message); }
+  await deleteMutation(histDocId,i,'mutasi_hapus_riwayat');
+  if(histDocId) setTimeout(refreshHist,400);
 };
 
 // ===================== IMPORT MUTASI (jenis manual) =====================
@@ -2078,6 +2121,26 @@ window.mutChange = function(key, field, val){
 window.mutSave = async function(itemId, idx){
   const key = itemId+'#'+idx;
   const d = mutDraft[key]; if(!d) return;
+  const btn = $('mutsave_'+key.replace('#','_'));
+  await saveMutationChange(itemId,idx,d,btn);
+};
+
+function linkedSaleForMutation(m,itemName){
+  if(m.saleId){
+    const byId = sales.find(s=>s.id===m.saleId);
+    if(byId) return byId;
+  }
+  if(m.ref){
+    const byRef = sales.filter(s=>s.ref===m.ref);
+    if(byRef.length===1) return byRef[0];
+  }
+  if(m.jenis!=='keluar') return null;
+  const key = reconciliationKey(m.tanggal,m.pihak,itemName,m.qty);
+  const exact = sales.filter(s=>reconciliationKey(s.tanggal,s.pelanggan,s.namaBarang||s.namaNota,s.qty)===key);
+  return exact.length===1 ? exact[0] : null;
+}
+
+async function saveMutationChange(itemId,idx,d,btn=null){
   const it = items.find(x=>x.id===itemId); if(!it) return;
   const arr = [...(it.mutasi||[])];
   const orig = arr[idx]; if(!orig) return;
@@ -2089,9 +2152,44 @@ window.mutSave = async function(itemId, idx){
   const targetItem = findExact(targetNama);
   if(!targetItem){ alert(`Barang "${targetNama}" tidak ada di daftar stok. Pilih nama yang persis sama dari daftar.`); return; }
 
-  const btn = $('mutsave_'+key.replace('#','_')); if(btn){ btn.disabled=true; btn.textContent='…'; }
+  const linkedSale = linkedSaleForMutation(orig,it.nama);
+  if(linkedSale && newM.jenis!=='keluar'){
+    alert('Mutasi ini terhubung ke penjualan, sehingga jenisnya harus tetap Keluar. Hapus penjualannya lebih dulu jika memang bukan transaksi penjualan.');
+    return;
+  }
+  if(btn){ btn.disabled=true; btn.textContent='…'; }
   try {
     const batch = writeBatch(db);
+    if(linkedSale){
+      const harga = parseFloat(linkedSale.harga)||0;
+      const subtotal = Math.round(qty*harga);
+      const hargaMaster = hargaOf(targetItem);
+      const ref = makeSaleRef({
+        tanggal:newM.tanggal, noNota:newM.noNota, pelanggan:newM.pihak,
+        namaRaw:linkedSale.namaNota||targetItem.nama, qty, harga
+      });
+      newM.ref = ref;
+      newM.saleId = linkedSale.id;
+      newM.sumber = 'penjualan';
+      newM.hargaJual = harga;
+      newM.subtotal = subtotal;
+      batch.update(doc(db,SALES_COLL,linkedSale.id),{
+        tanggal:newM.tanggal, pelanggan:newM.pihak, noNota:newM.noNota,
+        itemId:targetItem.id, namaBarang:targetItem.nama, qty,
+        subtotal, hargaMaster, selisihHarga:hargaMaster ? harga-hargaMaster : 0,
+        ref, stockDeducted:true, updatedAt:serverTimestamp(), updatedBy:userEmail()
+      });
+      if(linkedSale.importGroupId){
+        const imp = saleImports.find(x=>x.id===linkedSale.importGroupId);
+        if(imp){
+          const currentTotal = imp.totalAktif===undefined ? imp.total : imp.totalAktif;
+          batch.update(doc(db,SALES_IMPORT_COLL,linkedSale.importGroupId),{
+            totalAktif:Math.max(0,(parseFloat(currentTotal)||0)-(parseFloat(linkedSale.subtotal)||0)+subtotal),
+            updatedAt:serverTimestamp()
+          });
+        }
+      }
+    }
     if(targetItem.id !== itemId){
       // pindah ke barang lain
       arr.splice(idx,1);
@@ -2104,23 +2202,43 @@ window.mutSave = async function(itemId, idx){
     }
     await batch.commit();
     await auditLog('mutasi_edit', {
-      dariBarang: it.nama, keBarang: targetItem.nama, jenis: newM.jenis, qty: newM.qty, tanggal: newM.tanggal
+      dariBarang: it.nama, keBarang: targetItem.nama, jenis: newM.jenis, qty: newM.qty,
+      tanggal: newM.tanggal, saleId:linkedSale?linkedSale.id:''
     });
     mutDraft = {}; // index bisa bergeser → reset semua draft, onSnapshot re-render
+    if(histMutEdit) closeHistMutEdit();
+    if(histDocId) setTimeout(refreshHist,300);
   } catch(e){
     alert('Gagal: '+e.message);
     if(btn){ btn.disabled=false; btn.textContent='💾'; }
   }
-};
+}
 
 window.mutDel = async function(itemId, idx){
+  await deleteMutation(itemId,idx,'mutasi_hapus');
+};
+
+async function deleteMutation(itemId,idx,auditAction){
   const it = items.find(x=>x.id===itemId); if(!it) return;
   const m = (it.mutasi||[])[idx]; if(!m) return;
-  if(!confirm(`Hapus mutasi ${m.jenis} ${num(m.qty)} (${it.nama}) tanggal ${isoToDisp(m.tanggal)}?`)) return;
+  const linked = linkedSaleForMutation(m,it.nama);
+  const note = linked ? '\n\nLaporan penjualan tetap disimpan, tetapi akan ditandai belum memiliki mutasi stok.' : '';
+  if(!confirm(`Hapus mutasi ${m.jenis} ${num(m.qty)} (${it.nama}) tanggal ${isoToDisp(m.tanggal)}?${note}`)) return;
   const arr = (it.mutasi||[]).filter((_,x)=>x!==idx);
-  try { mutDraft = {}; await updateDoc(doc(db, COLL, itemId), { mutasi: arr }); await auditLog('mutasi_hapus', { barang: it.nama, jenis: m.jenis, qty: m.qty, tanggal: m.tanggal }); }
+  try {
+    mutDraft = {};
+    const batch=writeBatch(db);
+    batch.update(doc(db,COLL,itemId),{mutasi:arr});
+    if(linked){
+      batch.update(doc(db,SALES_COLL,linked.id),{
+        stockDeducted:false, updatedAt:serverTimestamp(), updatedBy:userEmail()
+      });
+    }
+    await batch.commit();
+    await auditLog(auditAction,{barang:it.nama,jenis:m.jenis,qty:m.qty,tanggal:m.tanggal,saleId:linked?linked.id:''});
+  }
   catch(e){ alert('Gagal: '+e.message); }
-};
+}
 
 // ===================== HITUNG FISIK =====================
 window.toggleFisBelum = function(){ fisBelumOn = !fisBelumOn; $('fisBelum').classList.toggle('active', fisBelumOn); renderFisik(); };

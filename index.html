@@ -449,8 +449,29 @@
     <h3 id="hmTitle">Riwayat</h3>
     <div class="sub" id="hmSub"></div>
     <div class="hist-wrap" id="hmList"></div>
-    <div class="hint">Untuk edit qty/tanggal/jenis, pakai tab 🧾 Semua Mutasi. Di sini klik ✕ untuk menghapus satu mutasi.</div>
+    <div class="hint">Klik tombol edit untuk memperbaiki tanggal, barang, qty, pihak, atau nomor nota. Penjualan yang terhubung akan ikut diperbarui.</div>
     <div class="modal-close-row"><button class="btn btn-line" onclick="closeHist()">Tutup</button></div>
+  </div>
+</div>
+
+<!-- ============ MODAL EDIT MUTASI DARI RIWAYAT ============ -->
+<div class="modal" id="histMutModal">
+  <div class="modal-box wide" onclick="event.stopPropagation()">
+    <h3>Edit Mutasi</h3>
+    <div class="sub" id="histMutSub"></div>
+    <div class="e-grid">
+      <div class="field"><label>Jenis</label><select id="hmJenis"><option value="masuk">Masuk</option><option value="keluar">Keluar</option></select></div>
+      <div class="field"><label>Tanggal</label><input type="date" id="hmTanggal"></div>
+      <div class="field"><label>Barang</label><input type="text" id="hmBarang" list="itemList"></div>
+      <div class="field"><label>Qty</label><input type="text" inputmode="decimal" id="hmQty"></div>
+      <div class="field"><label>Pihak</label><input type="text" id="hmPihak"></div>
+      <div class="field"><label>No. nota</label><input type="text" id="hmNota"></div>
+    </div>
+    <div class="err-msg" id="histMutErr"></div>
+    <div class="modal-close-row">
+      <button class="btn btn-line" onclick="closeHistMutEdit()">Batal</button>
+      <button class="btn btn-t" id="histMutSaveBtn" onclick="saveHistMutEdit()">Simpan</button>
+    </div>
   </div>
 </div>
 
