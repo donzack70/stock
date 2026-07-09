@@ -1263,6 +1263,15 @@ function renderSaleImportHistory(){
   ${saleImports.length>30?'<div class="hint" style="margin-top:6px">Menampilkan 30 kelompok import terbaru.</div>':''}`;
 }
 
+window.toggleSaleImportHistory = function(){
+  const wrap = $('saleImportHistoryWrap');
+  const btn = $('saleHistoryToggle');
+  const open = wrap.style.display !== 'none';
+  wrap.style.display = open ? 'none' : 'block';
+  btn.textContent = open ? 'Lihat riwayat' : 'Tutup riwayat';
+  if(!open) renderSaleImportHistory();
+};
+
 window.lapJualResetDate = function(){
   $('lapJualDari').value = '';
   $('lapJualSampai').value = '';

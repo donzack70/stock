@@ -272,9 +272,12 @@
   <div class="card">
     <div class="card-title">Riwayat Import Penjualan
       <span class="spacer"></span>
-      <span class="hint" style="margin:0">Satu proses paste tercatat sebagai satu kelompok.</span>
+      <button class="btn btn-line btn-sm" id="saleHistoryToggle" onclick="toggleSaleImportHistory()">Lihat riwayat</button>
     </div>
-    <div id="saleImportHistory"></div>
+    <div id="saleImportHistoryWrap" style="display:none">
+      <div class="hint" style="margin:0 0 8px">Satu proses paste tercatat sebagai satu kelompok.</div>
+      <div id="saleImportHistory"></div>
+    </div>
   </div>
 </div>
 
