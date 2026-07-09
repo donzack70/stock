@@ -163,7 +163,7 @@ let sales = [];
 let saleImports = [];
 let curTab = 'dash';
 let fltMinusOn = false, fisBelumOn = false, fltTerjualOn = false, fltBelumTerjualOn = false;
-let editDocId = null, histDocId = null, saleEditId = null;
+let editDocId = null, histDocId = null, saleEditId = null, saleCreateMutation = null;
 let importRows = [];
 let jualRows = [];
 let lastSaleImport = null;
@@ -232,7 +232,8 @@ function startListening(){
   unsubSales = onSnapshot(sq, snap => {
     sales = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if(curTab==='dash') renderDash();
-    if(curTab==='lapjual') renderLaporanJual();
+    if(curTab==='lapjual'){ renderLaporanJual(); renderRekonsiliasi(); }
+    renderRekonBadge();
   }, err => {
     console.warn('Gagal membaca penjualan:', err);
   });
@@ -274,6 +275,44 @@ function mutasiLooseKeys({tanggal, pihak='', noNota='', nama='', qty=0}){
   ];
   if(!p) keys.push([t, n, q].join('|'));
   return keys;
+}
+
+function reconciliationKey(tanggal, pihak, nama, qty){
+  return [String(tanggal||''), normalizeName(pihak), normalizeName(nama), qtyKey(qty)].join('|');
+}
+
+function reconciliationData(){
+  const mutations = [];
+  items.forEach(it => (it.mutasi||[]).forEach((m,idx) => {
+    if(m.jenis==='keluar') mutations.push({ itemId:it.id, itemNama:it.nama, idx, ...m });
+  }));
+  const activeMutations = mutations.filter(m=>!m.nonSale);
+  const ignoredMutations = mutations.filter(m=>m.nonSale);
+  const saleBuckets = new Map();
+  sales.forEach(s => {
+    const key = reconciliationKey(s.tanggal,s.pelanggan,s.namaBarang||s.namaNota,s.qty);
+    if(!saleBuckets.has(key)) saleBuckets.set(key,[]);
+    saleBuckets.get(key).push(s);
+  });
+  const usedSales = new Set();
+  const missingSales = [];
+  let matched = 0;
+  activeMutations.forEach(m => {
+    const key = reconciliationKey(m.tanggal,m.pihak,m.itemNama,m.qty);
+    const match = (saleBuckets.get(key)||[]).find(s=>!usedSales.has(s.id));
+    if(match){ usedSales.add(match.id); matched++; }
+    else missingSales.push(m);
+  });
+  const missingMutations = sales.filter(s=>!usedSales.has(s.id));
+  return { matched, missingSales, missingMutations, ignoredMutations };
+}
+
+function renderRekonBadge(){
+  const el = $('rekonBadge'); if(!el) return;
+  const r = reconciliationData();
+  const total = r.missingSales.length + r.missingMutations.length;
+  el.className = 'tag ' + (total ? 'tag-dup' : 'tag-masuk');
+  el.textContent = total ? `${total} perlu diperiksa` : 'Semua cocok';
 }
 
 function validJualRows(){
@@ -363,9 +402,10 @@ function renderAll(){
   renderKatOptions();
   if(curTab==='dash') renderDash();
   if(curTab==='stok') renderStok();
-  if(curTab==='lapjual'){ renderLaporanJual(); renderSaleImportHistory(); }
+  if(curTab==='lapjual'){ renderLaporanJual(); renderSaleImportHistory(); renderRekonsiliasi(); }
   if(curTab==='mutasi') renderMutasi();
   if(curTab==='fisik') renderFisik();
+  renderRekonBadge();
   $('itemList').innerHTML = items.map(it=>`<option value="${esc(it.nama)}">`).join('');
 }
 
@@ -1295,6 +1335,101 @@ window.renderLaporanJual = function(){
   }).join('');
 };
 
+window.toggleRekonsiliasi = function(){
+  const wrap = $('rekonWrap'), btn = $('rekonToggle');
+  const open = wrap.style.display !== 'none';
+  wrap.style.display = open ? 'none' : 'block';
+  btn.textContent = open ? 'Buka pemeriksaan' : 'Tutup pemeriksaan';
+  if(!open) renderRekonsiliasi();
+};
+
+function renderRekonsiliasi(){
+  renderRekonBadge();
+  const el = $('rekonContent'); if(!el) return;
+  const r = reconciliationData();
+  const mutRows = r.missingSales.map(m=>`<tr>
+    <td>${isoToDisp(m.tanggal)}</td>
+    <td>${esc(m.pihak||'')}</td>
+    <td class="nama-cell">${esc(m.itemNama)}</td>
+    <td class="r">${num(m.qty)} ${esc(m.sat||'')}</td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-t btn-sm" onclick="openSaleFromMutation('${m.itemId}',${m.idx})">Buat penjualan</button>
+      <button class="btn btn-line btn-sm" onclick="markMutationNonSale('${m.itemId}',${m.idx},true)">Bukan penjualan</button>
+    </td>
+  </tr>`).join('');
+  const saleRows = r.missingMutations.map(s=>`<tr>
+    <td>${isoToDisp(s.tanggal)}</td>
+    <td>${esc(s.pelanggan||'')}</td>
+    <td class="nama-cell">${esc(s.namaBarang||s.namaNota||'')}</td>
+    <td class="r">${num(s.qty)} ${esc(s.sat||'')}</td>
+    <td><button class="btn btn-t btn-sm" onclick="applySaleToStock('${s.id}')">Buat mutasi stok</button></td>
+  </tr>`).join('');
+  const ignoredRows = r.ignoredMutations.map(m=>`<tr>
+    <td>${isoToDisp(m.tanggal)}</td>
+    <td>${esc(m.pihak||'')}</td>
+    <td class="nama-cell">${esc(m.itemNama)}</td>
+    <td class="r">${num(m.qty)} ${esc(m.sat||'')}</td>
+    <td><button class="btn btn-line btn-sm" onclick="markMutationNonSale('${m.itemId}',${m.idx},false)">Kembalikan</button></td>
+  </tr>`).join('');
+  el.innerHTML = `
+    <div class="mut-sum">
+      <span>Cocok: <b>${r.matched}</b></span>
+      <span style="color:#b7600a">Belum masuk laporan: <b>${r.missingSales.length}</b></span>
+      <span style="color:#c0392b">Belum masuk stok: <b>${r.missingMutations.length}</b></span>
+      <span>Bukan penjualan: <b>${r.ignoredMutations.length}</b></span>
+    </div>
+    <div class="card-title" style="margin-top:12px">Mutasi keluar belum masuk laporan penjualan</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Tanggal</th><th>Pihak</th><th>Barang</th><th class="r">Qty</th><th style="width:230px"></th></tr></thead>
+      <tbody>${mutRows||'<tr><td colspan="5" class="empty">Tidak ada. Semua mutasi keluar sudah cocok.</td></tr>'}</tbody>
+    </table></div>
+    <div class="card-title" style="margin-top:16px">Penjualan belum memiliki mutasi stok</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Tanggal</th><th>Pelanggan</th><th>Barang</th><th class="r">Qty</th><th style="width:140px"></th></tr></thead>
+      <tbody>${saleRows||'<tr><td colspan="5" class="empty">Tidak ada. Semua penjualan sudah cocok.</td></tr>'}</tbody>
+    </table></div>
+    ${ignoredRows?`<div class="card-title" style="margin-top:16px">Ditandai bukan penjualan</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Tanggal</th><th>Pihak</th><th>Barang</th><th class="r">Qty</th><th style="width:110px"></th></tr></thead>
+      <tbody>${ignoredRows}</tbody>
+    </table></div>`:''}`;
+}
+
+window.markMutationNonSale = async function(itemId, idx, value){
+  const it = items.find(x=>x.id===itemId), m = it && (it.mutasi||[])[idx];
+  if(!it || !m) return;
+  const text = value ? 'Tandai mutasi ini sebagai bukan penjualan?' : 'Kembalikan mutasi ini ke pemeriksaan penjualan?';
+  if(!confirm(text)) return;
+  const arr = [...(it.mutasi||[])];
+  arr[idx] = {
+    ...m, nonSale:!!value,
+    nonSaleAt:value ? new Date().toISOString() : '',
+    nonSaleBy:value ? userEmail() : ''
+  };
+  try {
+    await updateDoc(doc(db,COLL,itemId),{ mutasi:arr });
+    await auditLog(value?'mutasi_bukan_penjualan':'mutasi_kembali_rekonsiliasi',{ barang:it.nama, tanggal:m.tanggal, qty:m.qty });
+  } catch(e){ alert('Gagal memperbarui mutasi: '+e.message); }
+};
+
+window.applySaleToStock = async function(id){
+  const s = sales.find(x=>x.id===id); if(!s) return;
+  const it = items.find(x=>x.id===s.itemId) || findExact(s.namaBarang);
+  if(!it){ alert('Barang stok tidak ditemukan. Edit nama barang penjualan terlebih dahulu.'); return; }
+  const akhir = teoritisOf(it) - (parseFloat(s.qty)||0);
+  const warning = akhir<0 ? `\n\nPerhatian: stok ${it.nama} akan menjadi ${num(akhir)} ${it.sat||'kg'}.` : '';
+  if(!confirm(`Buat mutasi stok keluar untuk penjualan ${s.pelanggan||''} - ${it.nama} ${num(s.qty)} ${s.sat||''}?${warning}`)) return;
+  try {
+    const linked = { ...s, stockDeducted:true };
+    const batch = writeBatch(db);
+    batch.update(doc(db,SALES_COLL,id),{ stockDeducted:true, updatedAt:serverTimestamp(), updatedBy:userEmail() });
+    batch.update(doc(db,COLL,it.id),{ mutasi:[...(it.mutasi||[]),saleMutationFor(linked,it)] });
+    await batch.commit();
+    await auditLog('rekonsiliasi_buat_mutasi',{ saleId:id, barang:it.nama, qty:s.qty });
+    showMsg('lapJualOk','Mutasi stok berhasil dibuat.',5000);
+  } catch(e){ alert('Gagal membuat mutasi stok: '+e.message); }
+};
+
 function renderSaleImportHistory(){
   const el = $('saleImportHistory'); if(!el) return;
   if(!saleImports.length){
@@ -1391,7 +1526,10 @@ async function syncSaleMutation(batch, oldSale, newSale){
 
 window.editSale = function(id){
   const s = sales.find(x=>x.id===id); if(!s) return;
+  saleCreateMutation = null;
   saleEditId = id;
+  $('saleEditTitle').textContent = 'Edit Penjualan';
+  $('seBarang').disabled = false;
   $('saleEditErr').style.display='none';
   $('saleEditSub').textContent = s.stockDeducted ? 'Penjualan ini sudah mengurangi stok. Jika qty/barang/tanggal diubah, mutasi stok ikut diperbarui.' : 'Penjualan ini tidak mengurangi stok.';
   $('seTanggal').value = s.tanggal || todayIso();
@@ -1406,8 +1544,31 @@ window.editSale = function(id){
   $('saleModal').classList.add('show');
 };
 
+window.openSaleFromMutation = function(itemId,idx){
+  const it = items.find(x=>x.id===itemId), m = it && (it.mutasi||[])[idx];
+  if(!it || !m) return;
+  saleEditId = null;
+  saleCreateMutation = { itemId, idx };
+  $('saleEditTitle').textContent = 'Buat Penjualan dari Mutasi';
+  $('saleEditSub').textContent = 'Stok sudah berkurang. Lengkapi harga jual lalu simpan ke laporan penjualan.';
+  $('saleEditErr').style.display='none';
+  $('seTanggal').value = m.tanggal || todayIso();
+  $('sePelanggan').value = m.pihak || '';
+  $('seKota').value = '';
+  $('seNota').value = m.noNota || '';
+  $('seBarang').value = it.nama;
+  $('seBarang').disabled = true;
+  $('seSat').value = m.sat || it.sat || 'kg';
+  $('seQty').value = String(m.qty||'').replace('.',',');
+  $('seHarga').value = it.harga ? grpRibu(it.harga) : '';
+  updateSaleEditCalc();
+  $('saleModal').classList.add('show');
+};
+
 window.closeSaleEdit = function(){
   saleEditId = null;
+  saleCreateMutation = null;
+  $('seBarang').disabled = false;
   $('saleModal').classList.remove('show');
 };
 
@@ -1426,7 +1587,54 @@ window.updateSaleEditCalc = function(){
 
 ['seBarang','seQty','seHarga'].forEach(id => setTimeout(()=>{ const el=$(id); if(el) el.addEventListener('input', updateSaleEditCalc); },0));
 
+async function saveSaleFromMutation(){
+  const src = saleCreateMutation;
+  const it = src && items.find(x=>x.id===src.itemId);
+  const m = it && (it.mutasi||[])[src.idx];
+  if(!it || !m){ showMsg('saleEditErr','Mutasi asal sudah berubah. Tutup lalu buka pemeriksaan kembali.',7000); return; }
+  const pd = parseImportDate($('seTanggal').value);
+  const qty = parseId($('seQty').value);
+  const harga = parseHargaValue($('seHarga').value);
+  if(!pd.ok){ showMsg('saleEditErr','Tanggal tidak valid.',6000); return; }
+  if(qty<=0){ showMsg('saleEditErr','Qty harus lebih dari 0.',6000); return; }
+  if(harga<=0){ showMsg('saleEditErr','Harga harus lebih dari 0.',6000); return; }
+  const pelanggan = $('sePelanggan').value.trim();
+  if(!pelanggan && !confirm('Nama pelanggan masih kosong. Tetap simpan?')) return;
+  const noNota = $('seNota').value.trim();
+  const sat = $('seSat').value.trim()||'kg';
+  const hargaMaster = hargaOf(it);
+  const saleRef = doc(collection(db,SALES_COLL));
+  const ref = makeSaleRef({ tanggal:pd.iso,noNota,pelanggan,namaRaw:it.nama,qty,harga });
+  const subtotal = Math.round(qty*harga);
+  const sale = {
+    id:saleRef.id, tanggal:pd.iso, pelanggan, kota:$('seKota').value.trim(), noNota,
+    itemId:it.id, namaBarang:it.nama, namaNota:it.nama, qty, sat, harga, subtotal,
+    hargaMaster, selisihHarga:hargaMaster ? harga-hargaMaster : 0,
+    stockDeducted:true, ref, sumber:'rekonsiliasi',
+    createdBy:userEmail(), createdAt:serverTimestamp()
+  };
+  const arr = [...(it.mutasi||[])];
+  arr[src.idx] = {
+    ...m, jenis:'keluar', tanggal:pd.iso, pihak:pelanggan, noNota, qty, sat,
+    hargaJual:harga, subtotal, ref, sumber:'penjualan', saleId:saleRef.id,
+    nonSale:false, nonSaleAt:'', nonSaleBy:''
+  };
+  const btn=$('saleEditSaveBtn'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Menyimpan...';
+  try {
+    const batch=writeBatch(db);
+    const {id,...payload}=sale;
+    batch.set(saleRef,payload);
+    batch.update(doc(db,COLL,it.id),{mutasi:arr});
+    await batch.commit();
+    await auditLog('rekonsiliasi_buat_penjualan',{saleId:saleRef.id,barang:it.nama,qty,total:subtotal});
+    closeSaleEdit();
+    showMsg('lapJualOk','Penjualan berhasil dibuat dari mutasi stok.',5000);
+  } catch(e){ showMsg('saleEditErr','Gagal membuat penjualan: '+e.message,8000); }
+  btn.disabled=false; btn.textContent='💾 Simpan';
+}
+
 window.saveSaleEdit = async function(){
+  if(saleCreateMutation) return saveSaleFromMutation();
   const s = sales.find(x=>x.id===saleEditId); if(!s) return;
   $('saleEditErr').style.display='none';
   const pd = parseImportDate($('seTanggal').value);

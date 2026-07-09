@@ -270,6 +270,17 @@
     <div class="ok-msg" id="lapJualOk"></div>
   </div>
   <div class="card">
+    <div class="card-title">Rekonsiliasi Stok &amp; Penjualan
+      <span class="spacer"></span>
+      <span id="rekonBadge" class="tag">Menghitung...</span>
+      <button class="btn btn-line btn-sm" id="rekonToggle" onclick="toggleRekonsiliasi()">Buka pemeriksaan</button>
+    </div>
+    <div id="rekonWrap" style="display:none">
+      <div class="hint" style="margin:0 0 8px">Dicocokkan satu per satu berdasarkan tanggal, pihak/pelanggan, barang, dan qty.</div>
+      <div id="rekonContent"></div>
+    </div>
+  </div>
+  <div class="card">
     <div class="card-title">Riwayat Import Penjualan
       <span class="spacer"></span>
       <button class="btn btn-line btn-sm" id="saleHistoryToggle" onclick="toggleSaleImportHistory()">Lihat riwayat</button>
@@ -386,7 +397,7 @@
 <!-- ============ MODAL EDIT PENJUALAN ============ -->
 <div class="modal" id="saleModal">
   <div class="modal-box wide" onclick="event.stopPropagation()">
-    <h3>Edit Penjualan</h3>
+    <h3 id="saleEditTitle">Edit Penjualan</h3>
     <div class="sub" id="saleEditSub"></div>
     <div class="e-grid">
       <div class="field"><label>Tanggal</label><input type="date" id="seTanggal"></div>
