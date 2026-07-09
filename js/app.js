@@ -763,6 +763,45 @@ function parseHargaValue(v){
   return digits ? parseInt(digits,10) : 0;
 }
 
+function unitMassFactor(sat){
+  const key = String(sat||'').trim().toLowerCase().replace(/\./g,'');
+  const factors = {
+    kg:1, kilogram:1,
+    ons:0.1, ounce:0.1,
+    g:0.001, gr:0.001, gram:0.001
+  };
+  return factors[key] || null;
+}
+
+function normalizeSaleUnit(qty, sat, harga, subtotal, masterSat){
+  const from = unitMassFactor(sat);
+  const to = unitMassFactor(masterSat);
+  if(!from || !to){
+    return { qty, sat:sat||masterSat||'kg', harga, subtotal, converted:false };
+  }
+  const normalizedQty = Math.round((qty * from / to) * 1000000) / 1000000;
+  const normalizedHarga = Math.round((harga * to / from) * 100) / 100;
+  return {
+    qty:normalizedQty,
+    sat:masterSat||sat||'kg',
+    harga:normalizedHarga,
+    subtotal:subtotal || Math.round(normalizedQty * normalizedHarga),
+    converted:Math.abs(normalizedQty-qty)>0.000001 || normalizeName(sat)!==normalizeName(masterSat)
+  };
+}
+
+function normalizeStockQty(qty, sat, masterSat){
+  const from = unitMassFactor(sat);
+  const to = unitMassFactor(masterSat);
+  if(!from || !to) return { qty, sat:sat||masterSat||'kg', converted:false };
+  const normalizedQty = Math.round((qty * from / to) * 1000000) / 1000000;
+  return {
+    qty:normalizedQty,
+    sat:masterSat||sat||'kg',
+    converted:Math.abs(normalizedQty-qty)>0.000001 || normalizeName(sat)!==normalizeName(masterSat)
+  };
+}
+
 window.parseHarga = function(){
   $('hImpErr').style.display='none';
   $('hImpPrev').innerHTML=''; hargaParsed=[];
@@ -1005,22 +1044,25 @@ window.parseJual = function(){
     const r = lines[i]; if(r.length < 2) continue;
     if(cleanHeader(r[iTgl]) === 'tanggal' || cleanHeader(r[iNama]) === 'nama barang') continue;
     const namaRaw = String(r[iNama]||'').trim();
-    const qty = parseId(r[iQty]);
-    const harga = parseHargaValue(r[iHarga]);
-    if(!namaRaw || qty <= 0 || harga <= 0) continue;
+    const sourceQty = parseId(r[iQty]);
+    const sourceHarga = parseHargaValue(r[iHarga]);
+    if(!namaRaw || sourceQty <= 0 || sourceHarga <= 0) continue;
     const parsedDate = parseImportDate(r[iTgl]);
     const tanggal = parsedDate.iso;
     const pelanggan = String(r[iPelanggan]||'').trim();
     const kota = iKota>=0 ? String(r[iKota]||'').trim() : '';
     const noNota = iNota>=0 ? String(r[iNota]||'').trim() : '';
-    const sat = iSat>=0 ? String(r[iSat]||'kg').trim() : 'kg';
-    const subtotal = iSubtotal>=0 ? (parseHargaValue(r[iSubtotal]) || Math.round(qty * harga)) : Math.round(qty * harga);
+    const sourceSat = iSat>=0 ? String(r[iSat]||'kg').trim() : 'kg';
+    const sourceSubtotal = iSubtotal>=0 ? (parseHargaValue(r[iSubtotal]) || Math.round(sourceQty * sourceHarga)) : Math.round(sourceQty * sourceHarga);
     const hargaMasterSheet = iHargaMaster>=0 ? parseHargaValue(r[iHargaMaster]) : 0;
     const exact = findExact(namaRaw);
     const fuzzy = exact ? null : fuzzyFind(namaRaw);
     const match = exact || fuzzy;
+    const normalized = normalizeSaleUnit(sourceQty, sourceSat, sourceHarga, sourceSubtotal, match ? match.sat : sourceSat);
+    const { qty, sat, harga, subtotal } = normalized;
     const row = {
       tanggal, pelanggan, kota, noNota, namaRaw, qty, sat, harga, subtotal, hargaMasterSheet,
+      sourceQty, sourceSat, sourceHarga, sourceSubtotal, unitConverted:normalized.converted,
       target: match ? match.nama : '', itemId: match ? match.id : '',
       fuzzy: !!fuzzy, invalidDate: !parsedDate.ok,
       rawTanggal: parsedDate.raw || String(r[iTgl]||'').trim()
@@ -1030,7 +1072,7 @@ window.parseJual = function(){
     row.ref = makeSaleRef(row);
     row.dupSales = salesRefs.has(row.ref);
     const cekNama = match ? match.nama : namaRaw;
-    const legacyRef = ['keluar', tanggal, noNota, namaRaw, qty].join('|').toLowerCase();
+    const legacyRef = ['keluar', tanggal, noNota, namaRaw, sourceQty].join('|').toLowerCase();
     row.dupMutasi = mutasiRefs.has(row.ref) || mutasiRefs.has(legacyRef)
       || mutasiLooseKeys({ tanggal, pihak:pelanggan, noNota, nama:cekNama, qty }).some(k=>mutasiRefs.has(k))
       || mutasiLooseKeys({ tanggal, pihak:pelanggan, noNota, nama:namaRaw, qty }).some(k=>mutasiRefs.has(k));
@@ -1089,16 +1131,20 @@ function jualRowHtml(r, i){
   const dateHtml = r.invalidDate
     ? `<span style="color:#c0392b;font-weight:700">Tanggal salah</span><br><span style="color:#aaa">${esc(r.rawTanggal||'-')}</span>`
     : isoToDisp(r.tanggal);
-  return `<tr>
+  return `<tr id="jualRow_${i}">
     <td><input type="checkbox" id="jualC_${i}" ${r.checked?'checked':''} onchange="jualCheck(${i},this.checked)" style="width:15px;height:15px"></td>
     <td>${dateHtml}</td>
     <td style="color:#666;font-size:11.5px">${esc(r.pelanggan)}${r.kota?'<br><span style="color:#aaa">'+esc(r.kota)+'</span>':''}</td>
     <td style="font-size:11.5px;color:#666">${esc(r.namaRaw)}</td>
-    <td><input class="${cls}" list="itemList" value="${esc(r.target)}" oninput="jualOnTarget(${i},this)" placeholder="Pilih barang stok..."></td>
-    <td class="r">${num(r.qty)} ${esc(r.sat)}</td>
+    <td><input class="${cls}" list="itemList" value="${esc(r.target)}" oninput="jualOnTarget(${i},this)" onchange="jualNormalizeTarget(${i},this)" placeholder="Pilih barang stok..."></td>
+    <td class="r" style="min-width:118px">
+      <input class="r" style="width:68px;text-align:right" inputmode="decimal" value="${String(r.qty).replace('.',',')}" oninput="jualOnQty(${i},this.value)">
+      <span style="display:inline-block;min-width:24px">${esc(r.sat)}</span>
+      ${r.unitConverted?`<span class="drum-note">${num(r.sourceQty)} ${esc(r.sourceSat)} → standar</span>`:''}
+    </td>
     <td class="r">${rp(r.harga)}</td>
     <td class="r">${r.hargaMaster?`${rp(r.hargaMaster)}${r.selisihHarga?`<br><span class="${r.selisihHarga<0?'neg':'pos'}">${r.selisihHarga>0?'+':''}${rp(r.selisihHarga)}</span>`:''}`:'<span class="zero">-</span>'}</td>
-    <td class="r" style="font-weight:700">${rp(r.subtotal)}</td>
+    <td class="r" style="font-weight:700" id="jualSubtotal_${i}">${rp(r.subtotal)}</td>
     <td style="font-size:10.5px">
       ${r.dupSales?'<span class="tag tag-dup">sudah di laporan</span> ':''}
       ${r.dupMutasi?'<span class="tag tag-dup">sudah di mutasi</span> ':''}
@@ -1115,12 +1161,45 @@ window.jualCheck = function(i, checked){
 
 window.jualOnTarget = function(i, inp){
   const exact = findExact(inp.value);
-  jualRows[i].target = inp.value;
-  jualRows[i].itemId = exact ? exact.id : '';
-  jualRows[i].hargaMaster = exact ? hargaOf(exact) : 0;
-  jualRows[i].selisihHarga = jualRows[i].hargaMaster ? jualRows[i].harga - jualRows[i].hargaMaster : 0;
-  jualRows[i].fuzzy = false;
+  const row = jualRows[i];
+  row.target = inp.value;
+  row.itemId = exact ? exact.id : '';
+  row.hargaMaster = exact ? hargaOf(exact) : 0;
+  row.selisihHarga = row.hargaMaster ? row.harga - row.hargaMaster : 0;
+  row.fuzzy = false;
   inp.className = exact ? 'ok' : 'warn';
+};
+
+window.jualNormalizeTarget = function(i, inp){
+  const row = jualRows[i];
+  const exact = findExact(inp.value);
+  if(!row || !exact) return;
+  const normalized = normalizeSaleUnit(
+    row.sourceQty ?? row.qty,
+    row.sourceSat ?? row.sat,
+    row.sourceHarga ?? row.harga,
+    row.sourceSubtotal ?? row.subtotal,
+    exact.sat
+  );
+  Object.assign(row, {
+    target:exact.nama, itemId:exact.id,
+    qty:normalized.qty, sat:normalized.sat, harga:normalized.harga, subtotal:normalized.subtotal,
+    unitConverted:normalized.converted,
+    hargaMaster:hargaOf(exact), fuzzy:false
+  });
+  row.selisihHarga = row.hargaMaster ? row.harga-row.hargaMaster : 0;
+  row.ref = makeSaleRef(row);
+  const tr = $('jualRow_'+i);
+  if(tr) tr.outerHTML = jualRowHtml(row,i);
+};
+
+window.jualOnQty = function(i, value){
+  const row = jualRows[i]; if(!row) return;
+  row.qty = parseId(value);
+  row.subtotal = Math.round(row.qty * row.harga);
+  row.ref = makeSaleRef(row);
+  const el = $('jualSubtotal_'+i);
+  if(el) el.textContent = rp(row.subtotal);
 };
 
 window.jualToggleAll = function(v){
@@ -1882,26 +1961,32 @@ window.parseImport = function(){
   for(let i=1;i<lines.length;i++){
     const r = lines[i]; if(r.length < 2) continue;
     const namaRaw = String(r[iNama]||'').trim();
-    const qty = parseId(r[iQty]);
-    if(!namaRaw || qty <= 0) continue;
+    const sourceQty = parseId(r[iQty]);
+    if(!namaRaw || sourceQty <= 0) continue;
     const parsedDate = iTgl>=0 ? parseImportDate(r[iTgl]) : { iso: todayIso(), ok: true, empty: true };
     const tanggal = parsedDate.iso;
     const pihak = iPihak>=0 ? String(r[iPihak]||'').trim() : '';
     const noNota = iNota>=0 ? String(r[iNota]||'').trim() : '';
-    const sat = iSat>=0 ? String(r[iSat]||'kg').trim() : 'kg';
-    const ref = [jenis, tanggal, noNota, namaRaw, qty].join('|').toLowerCase();
+    const sourceSat = iSat>=0 ? String(r[iSat]||'kg').trim() : 'kg';
 
     const exact = findExact(namaRaw);
     const fuzzy = exact ? null : fuzzyFind(namaRaw);
     const match = exact || fuzzy;
+    const normalized = normalizeStockQty(sourceQty, sourceSat, match ? match.sat : sourceSat);
+    const qty = normalized.qty;
+    const sat = normalized.sat;
+    const ref = [jenis, tanggal, noNota, namaRaw, qty].join('|').toLowerCase();
+    const legacyRef = [jenis, tanggal, noNota, namaRaw, sourceQty].join('|').toLowerCase();
+    const dup = existingRefs.has(ref) || existingRefs.has(legacyRef);
     importRows.push({
       jenis, tanggal, pihak, noNota, sat, qty, namaRaw, ref,
+      sourceQty, sourceSat, unitConverted:normalized.converted,
       target: match ? match.nama : '',
       fuzzy: !!fuzzy,
       invalidDate: !parsedDate.ok,
       rawTanggal: parsedDate.raw || String(iTgl>=0 ? (r[iTgl]||'') : '').trim(),
-      dup: existingRefs.has(ref),
-      checked: !!exact && !existingRefs.has(ref) && parsedDate.ok
+      dup,
+      checked: !!exact && !dup && parsedDate.ok
     });
   }
   if(!importRows.length){ showMsg('impErr','Tidak ada baris valid.', 6000); return; }
@@ -1948,7 +2033,11 @@ function impRowHtml(r, i){
     <td style="color:#888;font-size:11.5px">${esc(r.pihak)}${r.noNota?'<br><span style="color:#bbb;font-size:10.5px">'+esc(r.noNota)+'</span>':''}</td>
     <td style="font-size:11.5px;color:#666">${esc(r.namaRaw)}</td>
     <td><input class="${cls}" list="itemList" value="${esc(r.target)}" oninput="impOnTarget(${i},this)" placeholder="Pilih barang stok..."></td>
-    <td><input class="r" style="width:74px;text-align:right" value="${String(r.qty).replace('.',',')}" oninput="importRows[${i}].qty=parseIdG(this.value)"></td>
+    <td>
+      <input class="r" style="width:74px;text-align:right" value="${String(r.qty).replace('.',',')}" oninput="importRows[${i}].qty=parseIdG(this.value)">
+      <span style="display:inline-block;min-width:24px">${esc(r.sat)}</span>
+      ${r.unitConverted?`<span class="drum-note">${num(r.sourceQty)} ${esc(r.sourceSat)} → standar</span>`:''}
+    </td>
     <td style="font-size:10.5px">
       ${r.dup?'<span class="tag tag-dup">duplikat?</span> ':''}
       ${r.fuzzy?'<span class="tag tag-fuzzy">🔀 fuzzy</span>':''}
