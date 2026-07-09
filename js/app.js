@@ -280,6 +280,51 @@ function validJualRows(){
   return jualRows.filter(r => r.checked && !r.dupSales && !r.invalidDate && findExact(r.target) && r.qty > 0 && r.harga > 0);
 }
 
+function inspectJualSelection(kurangiStok){
+  const selected = jualRows.filter(r=>r.checked);
+  const errors = [];
+  const warnings = [];
+  const badDate = selected.filter(r=>r.invalidDate).length;
+  const noItem = selected.filter(r=>!findExact(r.target)).length;
+  const badQty = selected.filter(r=>!(parseFloat(r.qty)>0)).length;
+  const badPrice = selected.filter(r=>!(parseFloat(r.harga)>0)).length;
+  const duplicate = selected.filter(r=>r.dupSales).length;
+  if(badDate) errors.push(`${badDate} tanggal tidak valid`);
+  if(noItem) errors.push(`${noItem} barang belum cocok dengan master stok`);
+  if(badQty) errors.push(`${badQty} qty kosong atau nol`);
+  if(badPrice) errors.push(`${badPrice} harga kosong atau nol`);
+  if(duplicate) errors.push(`${duplicate} baris sudah ada di laporan`);
+
+  const noCustomer = selected.filter(r=>!String(r.pelanggan||'').trim()).length;
+  if(noCustomer) warnings.push(`${noCustomer} baris tanpa nama pelanggan`);
+
+  const extremePrice = selected.filter(r => {
+    const master = parseFloat(r.hargaMaster)||0;
+    const harga = parseFloat(r.harga)||0;
+    return master>0 && (harga < master*0.5 || harga > master*2);
+  });
+  if(extremePrice.length){
+    warnings.push(`${extremePrice.length} harga sangat jauh dari harga master (di bawah 50% atau di atas 200%)`);
+  }
+
+  if(kurangiStok){
+    const qtyByItem = {};
+    selected.forEach(r => {
+      const it = findExact(r.target); if(!it) return;
+      qtyByItem[it.id] = (qtyByItem[it.id]||0) + (parseFloat(r.qty)||0);
+    });
+    const minus = Object.entries(qtyByItem).map(([id,qty]) => {
+      const it = items.find(x=>x.id===id);
+      return it ? { nama:it.nama, akhir:Math.round((teoritisOf(it)-qty)*100)/100, sat:it.sat||'kg' } : null;
+    }).filter(x=>x && x.akhir<0);
+    if(minus.length){
+      const contoh = minus.slice(0,4).map(x=>`${x.nama} menjadi ${num(x.akhir)} ${x.sat}`).join('; ');
+      warnings.push(`${minus.length} barang akan menjadi minus: ${contoh}${minus.length>4?'; dan lainnya':''}`);
+    }
+  }
+  return { selected, errors, warnings };
+}
+
 // ===================== MATCHING NAMA =====================
 function findExact(nama){
   if(!nama) return null;
@@ -1053,11 +1098,24 @@ window.resetJualImport = function(){
 };
 
 window.doJualImport = async function(kurangiStok){
+  const check = inspectJualSelection(kurangiStok);
+  if(!check.selected.length){
+    showMsg('jualErr','Belum ada baris yang dicentang.', 5000);
+    return;
+  }
+  if(check.errors.length){
+    showMsg('jualErr','Belum bisa disimpan: '+check.errors.join(' · ')+'. Perbaiki atau hilangkan centang pada baris tersebut.', 9000);
+    return;
+  }
   const rows = validJualRows();
   if(!rows.length){ showMsg('jualErr','Tidak ada baris penjualan valid yang dicentang.', 5000); return; }
   if(kurangiStok && rows.some(r=>r.dupMutasi)){
     showMsg('jualErr','Ada baris tercentang yang sudah ada di mutasi stok. Pakai "Simpan penjualan saja" untuk melengkapi laporan, atau hilangkan centangnya.', 8000);
     return;
+  }
+  if(check.warnings.length){
+    const lanjut = confirm('PERINGATAN SEBELUM SIMPAN\n\n• '+check.warnings.join('\n• ')+'\n\nData tetap boleh disimpan. Sudah diperiksa dan ingin melanjutkan?');
+    if(!lanjut) return;
   }
   const btnOnly = $('jualOnlyBtn'), btnStock = $('jualStockBtn');
   if(btnOnly) btnOnly.disabled = true;
@@ -1660,6 +1718,21 @@ window.impToggleAll = function(v){ importRows.forEach((r,i)=>{ r.checked=v && !r
 window.doImport = async function(){
   const rows = importRows.filter(r => r.checked && !r.invalidDate && r.target && findExact(r.target) && r.qty > 0);
   if(!rows.length){ showMsg('impErr','Tidak ada baris valid yang dicentang.', 5000); return; }
+  if(importJenis==='keluar'){
+    const qtyByItem = {};
+    rows.forEach(r => {
+      const it = findExact(r.target);
+      qtyByItem[it.id] = (qtyByItem[it.id]||0) + (parseFloat(r.qty)||0);
+    });
+    const minus = Object.entries(qtyByItem).map(([id,qty]) => {
+      const it = items.find(x=>x.id===id);
+      return it && teoritisOf(it)-qty<0 ? `${it.nama} menjadi ${num(teoritisOf(it)-qty)} ${it.sat||'kg'}` : '';
+    }).filter(Boolean);
+    if(minus.length){
+      const lanjut = confirm(`PERINGATAN STOK MINUS\n\n${minus.slice(0,6).map(x=>'• '+x).join('\n')}${minus.length>6?`\n• dan ${minus.length-6} barang lainnya`:''}\n\nMutasi tetap boleh disimpan. Sudah diperiksa dan ingin melanjutkan?`);
+      if(!lanjut) return;
+    }
+  }
   const btn = $('impGoBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
   try {
     const byItem = {};
