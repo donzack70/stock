@@ -17,6 +17,7 @@ const COLL = 'stok_items'; // koleksi khusus app ini — terpisah dari 'transaks
 const AUDIT_COLL = 'stok_audit_logs';
 const ARCHIVE_COLL = 'stok_opname_archives';
 const SALES_COLL = 'stok_penjualan';
+const SALES_IMPORT_COLL = 'stok_penjualan_imports';
 
 // ===================== HELPERS =====================
 const $ = id => document.getElementById(id);
@@ -123,6 +124,7 @@ window.exportBackup = async function(){
       collections: {
         [COLL]: await readCollectionSafe(COLL),
         [SALES_COLL]: await readCollectionSafe(SALES_COLL),
+        [SALES_IMPORT_COLL]: await readCollectionSafe(SALES_IMPORT_COLL),
         [AUDIT_COLL]: await readCollectionSafe(AUDIT_COLL),
         [ARCHIVE_COLL]: await readCollectionSafe(ARCHIVE_COLL)
       }
@@ -155,9 +157,10 @@ function drumStr(kg, isiDrum){
 }
 
 // ===================== STATE =====================
-let auth=null, db=null, unsub=null, unsubSales=null;
+let auth=null, db=null, unsub=null, unsubSales=null, unsubSaleImports=null;
 let items = [];
 let sales = [];
+let saleImports = [];
 let curTab = 'dash';
 let fltMinusOn = false, fisBelumOn = false, fltTerjualOn = false, fltBelumTerjualOn = false;
 let editDocId = null, histDocId = null, saleEditId = null;
@@ -198,6 +201,7 @@ onAuthStateChanged(auth, user => {
     $('userBox').style.display='none'; $('logoutBtn').style.display='none';
     if(unsub){ unsub(); unsub=null; }
     if(unsubSales){ unsubSales(); unsubSales=null; }
+    if(unsubSaleImports){ unsubSaleImports(); unsubSaleImports=null; }
   }
 });
 
@@ -216,6 +220,7 @@ window.doLogout = function(){ if(auth) signOut(auth); };
 function startListening(){
   if(unsub) unsub();
   if(unsubSales) unsubSales();
+  if(unsubSaleImports) unsubSaleImports();
   const q = query(collection(db, COLL), orderBy('nama'));
   unsub = onSnapshot(q, snap => {
     items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -230,6 +235,16 @@ function startListening(){
     if(curTab==='lapjual') renderLaporanJual();
   }, err => {
     console.warn('Gagal membaca penjualan:', err);
+  });
+  unsubSaleImports = onSnapshot(collection(db, SALES_IMPORT_COLL), snap => {
+    saleImports = snap.docs.map(d => ({ id:d.id, ...d.data() }))
+      .sort((a,b)=>String(b.createdAtIso||'').localeCompare(String(a.createdAtIso||'')));
+    const latest = saleImports.find(x=>x.status==='active' && (parseInt(x.jumlah)||0)>0);
+    lastSaleImport = latest || null;
+    if($('undoSaleBtn')) $('undoSaleBtn').style.display = latest ? 'inline-block' : 'none';
+    if($('saleImportHistory')) renderSaleImportHistory();
+  }, err => {
+    console.warn('Gagal membaca riwayat import penjualan:', err);
   });
 }
 
@@ -303,7 +318,7 @@ function renderAll(){
   renderKatOptions();
   if(curTab==='dash') renderDash();
   if(curTab==='stok') renderStok();
-  if(curTab==='lapjual') renderLaporanJual();
+  if(curTab==='lapjual'){ renderLaporanJual(); renderSaleImportHistory(); }
   if(curTab==='mutasi') renderMutasi();
   if(curTab==='fisik') renderFisik();
   $('itemList').innerHTML = items.map(it=>`<option value="${esc(it.nama)}">`).join('');
@@ -1050,31 +1065,38 @@ window.doJualImport = async function(kurangiStok){
   const activeBtn = kurangiStok ? btnStock : btnOnly;
   if(activeBtn) activeBtn.innerHTML = '<span class="spinner"></span> Menyimpan...';
   try {
+    const importRef = doc(collection(db, SALES_IMPORT_COLL));
+    const prepared = rows.map(r => {
+      const it = findExact(r.target);
+      return { r, it, saleRef:doc(collection(db, SALES_COLL)) };
+    });
     const byItem = {};
     if(kurangiStok){
-      rows.forEach(r => {
-        const it = findExact(r.target);
+      prepared.forEach(({r,it,saleRef}) => {
         if(!byItem[it.id]) byItem[it.id] = { it, add: [] };
         byItem[it.id].add.push({
           jenis:'keluar', tanggal:r.tanggal, qty:r.qty, sat:r.sat,
           pihak:r.pelanggan, noNota:r.noNota, ref:r.ref,
-          hargaJual:r.harga, subtotal:r.subtotal, sumber:'penjualan'
+          hargaJual:r.harga, subtotal:r.subtotal, sumber:'penjualan',
+          saleId:saleRef.id, importGroupId:importRef.id
         });
       });
     }
     let batch = writeBatch(db), n = 0;
     const saleDocs = [];
-    for(const r of rows){
-      const it = findExact(r.target);
-      const saleRef = doc(collection(db, SALES_COLL));
-      saleDocs.push({ id:saleRef.id, ref:r.ref, itemId:it.id, stockDeducted:!!kurangiStok });
+    for(const {r,it,saleRef} of prepared){
+      saleDocs.push({
+        id:saleRef.id, ref:r.ref, itemId:it.id, stockDeducted:!!kurangiStok,
+        subtotal:r.subtotal, importGroupId:importRef.id
+      });
       batch.set(saleRef, {
         tanggal:r.tanggal, pelanggan:r.pelanggan, kota:r.kota, noNota:r.noNota,
         itemId:it.id, namaBarang:it.nama, namaNota:r.namaRaw,
         qty:r.qty, sat:r.sat, harga:r.harga, subtotal:r.subtotal,
         hargaMaster:r.hargaMaster||0, selisihHarga:r.selisihHarga||0,
         stockDeducted: !!kurangiStok,
-        ref:r.ref, createdBy:userEmail(), createdAt:serverTimestamp()
+        ref:r.ref, importGroupId:importRef.id,
+        createdBy:userEmail(), createdAt:serverTimestamp()
       });
       n++;
     }
@@ -1085,9 +1107,17 @@ window.doJualImport = async function(kurangiStok){
         n++;
       }
     }
-    await batch.commit();
     const total = rows.reduce((s,r)=>s+r.subtotal,0);
-    lastSaleImport = { saleDocs, stockDeducted:!!kurangiStok, at:new Date().toISOString() };
+    batch.set(importRef, {
+      jumlah:rows.length, jumlahAktif:rows.length, total, totalAktif:total, stockDeducted:!!kurangiStok,
+      status:'active', saleIds:saleDocs.map(x=>x.id),
+      createdBy:userEmail(), createdAt:serverTimestamp(), createdAtIso:new Date().toISOString()
+    });
+    await batch.commit();
+    lastSaleImport = {
+      id:importRef.id, saleDocs, jumlah:rows.length, total,
+      stockDeducted:!!kurangiStok, status:'active', createdAtIso:new Date().toISOString()
+    };
     $('undoSaleBtn').style.display = 'inline-block';
     await auditLog(kurangiStok ? 'import_penjualan_stok' : 'import_penjualan_saja', { jumlah: rows.length, total, barang: Object.keys(byItem).length });
     showMsg('jualOk', `✔ ${rows.length} baris penjualan disimpan. Total ${rp(total)}.${kurangiStok?' Stok sudah dikurangi.':' Stok tidak diubah.'}`, 8000);
@@ -1101,38 +1131,58 @@ window.doJualImport = async function(kurangiStok){
 };
 
 window.undoLastSaleImport = async function(){
-  if(!lastSaleImport || !lastSaleImport.saleDocs || !lastSaleImport.saleDocs.length){
+  if(!lastSaleImport || !lastSaleImport.id){
     alert('Belum ada import penjualan terakhir untuk dibatalkan.');
     return;
   }
-  const n = lastSaleImport.saleDocs.length;
-  const msg = `Batalkan import penjualan terakhir (${n} baris)?\n\n` +
-    (lastSaleImport.stockDeducted ? 'Data laporan akan dihapus dan mutasi stok keluar terkait ikut dihapus.' : 'Data laporan akan dihapus. Stok tidak berubah.');
+  await undoSaleImport(lastSaleImport.id);
+};
+
+window.undoSaleImport = async function(importId){
+  const imp = saleImports.find(x=>x.id===importId) || (lastSaleImport && lastSaleImport.id===importId ? lastSaleImport : null);
+  if(!imp || imp.status!=='active'){
+    alert('Kelompok import ini sudah dibatalkan atau tidak ditemukan.');
+    return;
+  }
+  let groupSales = sales.filter(s=>s.importGroupId===importId);
+  if(!groupSales.length && lastSaleImport && lastSaleImport.id===importId && lastSaleImport.saleDocs){
+    groupSales = lastSaleImport.saleDocs;
+  }
+  const n = groupSales.length;
+  if(!n){
+    alert('Tidak ada penjualan aktif dalam kelompok ini.');
+    return;
+  }
+  const msg = `Batalkan satu kelompok import (${n} baris, total ${rp(groupSales.reduce((a,s)=>a+(parseFloat(s.subtotal)||0),0))})?\n\n` +
+    (imp.stockDeducted ? 'Data laporan akan dihapus dan semua mutasi stok terkait ikut dihapus.' : 'Data laporan akan dihapus. Stok tidak berubah.');
   if(!confirm(msg)) return;
   try {
-    let batch = writeBatch(db), ops = 0;
-    lastSaleImport.saleDocs.forEach(s => { batch.delete(doc(db, SALES_COLL, s.id)); ops++; });
-    if(lastSaleImport.stockDeducted){
-      const refsByItem = {};
-      lastSaleImport.saleDocs.forEach(s => {
-        if(!refsByItem[s.itemId]) refsByItem[s.itemId] = new Set();
-        refsByItem[s.itemId].add(s.ref);
-      });
-      for(const itemId of Object.keys(refsByItem)){
+    const batch = writeBatch(db);
+    groupSales.forEach(s => batch.delete(doc(db, SALES_COLL, s.id)));
+    if(imp.stockDeducted){
+      const itemIds = new Set(groupSales.map(s=>s.itemId).filter(Boolean));
+      for(const itemId of itemIds){
         const it = items.find(x=>x.id===itemId); if(!it) continue;
-        const refs = refsByItem[itemId];
-        const mutasi = (it.mutasi||[]).filter(m => !refs.has(m.ref));
+        const saleIds = new Set(groupSales.filter(s=>s.itemId===itemId).map(s=>s.id));
+        const refs = new Set(groupSales.filter(s=>s.itemId===itemId).map(s=>s.ref));
+        const mutasi = (it.mutasi||[]).filter(m =>
+          m.importGroupId !== importId && !saleIds.has(m.saleId) &&
+          !(m.sumber==='penjualan' && refs.has(m.ref)));
         batch.update(doc(db, COLL, itemId), { mutasi });
-        ops++;
       }
     }
+    batch.update(doc(db, SALES_IMPORT_COLL, importId), {
+      status:'undone', undoneAt:serverTimestamp(), undoneAtIso:new Date().toISOString(),
+      undoneBy:userEmail(), jumlahAktif:0
+    });
     await batch.commit();
-    await auditLog('undo_import_penjualan', { jumlah:n, stockDeducted:lastSaleImport.stockDeducted });
-    lastSaleImport = null;
+    await auditLog('undo_import_penjualan', { importGroupId:importId, jumlah:n, stockDeducted:!!imp.stockDeducted });
+    if(lastSaleImport && lastSaleImport.id===importId) lastSaleImport = null;
     $('undoSaleBtn').style.display = 'none';
-    showMsg('jualErr','Import penjualan terakhir sudah dibatalkan.', 7000);
+    showMsg(curTab==='lapjual'?'lapJualOk':'jualErr','Kelompok import penjualan sudah dibatalkan.', 7000);
   } catch(e){
-    showMsg('jualErr','Gagal membatalkan import: '+e.message, 8000);
+    const target = curTab==='lapjual' ? 'lapJualOk' : 'jualErr';
+    showMsg(target,'Gagal membatalkan import: '+e.message, 8000);
   }
 };
 
@@ -1187,6 +1237,32 @@ window.renderLaporanJual = function(){
   }).join('');
 };
 
+function renderSaleImportHistory(){
+  const el = $('saleImportHistory'); if(!el) return;
+  if(!saleImports.length){
+    el.innerHTML = '<div class="empty">Belum ada riwayat kelompok import. Import berikutnya akan tercatat di sini.</div>';
+    return;
+  }
+  el.innerHTML = `<div class="tbl-wrap"><table>
+    <thead><tr><th>Waktu import</th><th class="r">Baris</th><th class="r">Total</th><th>Stok</th><th>Status</th><th style="width:110px"></th></tr></thead>
+    <tbody>${saleImports.slice(0,30).map(imp => {
+      const aktif = imp.status === 'active';
+      const dt = imp.createdAtIso ? new Date(imp.createdAtIso) : null;
+      const waktu = dt && !isNaN(dt) ? dt.toLocaleString('id-ID',{dateStyle:'medium',timeStyle:'short'}) : '-';
+      const jumlahAktif = imp.jumlahAktif === undefined ? imp.jumlah : imp.jumlahAktif;
+      return `<tr>
+        <td>${esc(waktu)}<span class="kat">${esc(imp.createdBy||'')}</span></td>
+        <td class="r">${num(jumlahAktif||0)}</td>
+        <td class="r" style="font-weight:700">${rp(imp.totalAktif===undefined ? imp.total : imp.totalAktif)}</td>
+        <td>${imp.stockDeducted?'<span class="tag tag-keluar">dikurangi</span>':'<span class="tag">tidak</span>'}</td>
+        <td>${aktif?'<span class="tag tag-masuk">aktif</span>':imp.status==='empty'?'<span class="tag">habis dihapus</span>':'<span class="tag tag-dup">dibatalkan</span>'}</td>
+        <td>${aktif && jumlahAktif>0?`<button class="btn btn-r btn-sm" onclick="undoSaleImport('${imp.id}')">Batalkan</button>`:''}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>
+  ${saleImports.length>30?'<div class="hint" style="margin-top:6px">Menampilkan 30 kelompok import terbaru.</div>':''}`;
+}
+
 window.lapJualResetDate = function(){
   $('lapJualDari').value = '';
   $('lapJualSampai').value = '';
@@ -1217,13 +1293,15 @@ function saleMutationFor(s, it){
   return {
     jenis:'keluar', tanggal:s.tanggal, qty:parseFloat(s.qty)||0, sat:s.sat||'kg',
     pihak:s.pelanggan||'', noNota:s.noNota||'', ref:s.ref,
-    hargaJual:parseFloat(s.harga)||0, subtotal:parseFloat(s.subtotal)||0, sumber:'penjualan'
+    hargaJual:parseFloat(s.harga)||0, subtotal:parseFloat(s.subtotal)||0, sumber:'penjualan',
+    saleId:s.id, importGroupId:s.importGroupId||''
   };
 }
 
-function removeSaleMutation(item, ref){
+function removeSaleMutation(item, sale){
   const arr = [...(item.mutasi||[])];
-  const idx = arr.findIndex(m => m.ref === ref);
+  let idx = arr.findIndex(m => sale.id && m.saleId === sale.id);
+  if(idx < 0) idx = arr.findIndex(m => m.sumber==='penjualan' && m.ref === sale.ref);
   if(idx >= 0) arr.splice(idx, 1);
   return arr;
 }
@@ -1233,7 +1311,7 @@ async function syncSaleMutation(batch, oldSale, newSale){
   const oldItem = items.find(it => it.id === oldSale.itemId) || findExact(oldSale.namaBarang);
   const newItem = items.find(it => it.id === newSale.itemId) || findExact(newSale.namaBarang);
   if(!oldItem || !newItem) throw new Error('Barang stok untuk mutasi penjualan tidak ditemukan.');
-  const oldArr = removeSaleMutation(oldItem, oldSale.ref);
+  const oldArr = removeSaleMutation(oldItem, oldSale);
   const newMut = saleMutationFor(newSale, newItem);
   if(oldItem.id === newItem.id){
     oldArr.push(newMut);
@@ -1299,16 +1377,31 @@ window.saveSaleEdit = async function(){
     itemId:it.id, namaBarang:it.nama, qty, sat:($('seSat').value.trim()||'kg'), harga, subtotal,
     hargaMaster, selisihHarga:hargaMaster ? harga - hargaMaster : 0
   };
+  updated.ref = makeSaleRef({
+    tanggal:updated.tanggal, noNota:updated.noNota, pelanggan:updated.pelanggan,
+    namaRaw:updated.namaNota||updated.namaBarang, qty:updated.qty, harga:updated.harga
+  });
   const btn = $('saleEditSaveBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
   try {
     const batch = writeBatch(db);
-    batch.update(doc(db, SALES_COLL, id), {
+    batch.update(doc(db, SALES_COLL, saleEditId), {
       tanggal:updated.tanggal, pelanggan:updated.pelanggan, kota:updated.kota, noNota:updated.noNota,
       itemId:updated.itemId, namaBarang:updated.namaBarang, qty:updated.qty, sat:updated.sat,
       harga:updated.harga, subtotal:updated.subtotal,
-      hargaMaster:updated.hargaMaster, selisihHarga:updated.selisihHarga
+      hargaMaster:updated.hargaMaster, selisihHarga:updated.selisihHarga, ref:updated.ref,
+      updatedAt:serverTimestamp(), updatedBy:userEmail()
     });
     await syncSaleMutation(batch, s, updated);
+    if(s.importGroupId){
+      const imp = saleImports.find(x=>x.id===s.importGroupId);
+      if(imp){
+        const currentTotal = imp.totalAktif===undefined ? imp.total : imp.totalAktif;
+        batch.update(doc(db, SALES_IMPORT_COLL, s.importGroupId), {
+          totalAktif:Math.max(0,(parseFloat(currentTotal)||0)-(parseFloat(s.subtotal)||0)+subtotal),
+          updatedAt:serverTimestamp()
+        });
+      }
+    }
     await batch.commit();
     await auditLog('penjualan_edit', { id:saleEditId, pelanggan:updated.pelanggan, barang:updated.namaBarang, subtotal:updated.subtotal, stockDeducted:!!updated.stockDeducted });
     closeSaleEdit();
@@ -1328,7 +1421,21 @@ window.deleteSale = async function(id){
     if(s.stockDeducted){
       const it = items.find(x=>x.id===s.itemId) || findExact(s.namaBarang);
       if(!it) throw new Error('Barang stok untuk menghapus mutasi tidak ditemukan.');
-      batch.update(doc(db, COLL, it.id), { mutasi: removeSaleMutation(it, s.ref) });
+      batch.update(doc(db, COLL, it.id), { mutasi: removeSaleMutation(it, s) });
+    }
+    if(s.importGroupId){
+      const imp = saleImports.find(x=>x.id===s.importGroupId);
+      if(imp){
+        const currentCount = imp.jumlahAktif===undefined ? imp.jumlah : imp.jumlahAktif;
+        const currentTotal = imp.totalAktif===undefined ? imp.total : imp.totalAktif;
+        const nextCount = Math.max(0,(parseInt(currentCount)||0)-1);
+        batch.update(doc(db, SALES_IMPORT_COLL, s.importGroupId), {
+          jumlahAktif:nextCount,
+          totalAktif:Math.max(0,(parseFloat(currentTotal)||0)-(parseFloat(s.subtotal)||0)),
+          status:nextCount ? 'active' : 'empty',
+          updatedAt:serverTimestamp()
+        });
+      }
     }
     await batch.commit();
     await auditLog('penjualan_hapus', { id, pelanggan:s.pelanggan||'', barang:s.namaBarang||'', subtotal:s.subtotal||0, stockDeducted:!!s.stockDeducted });
