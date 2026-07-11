@@ -166,6 +166,7 @@ let fltMinusOn = false, fisBelumOn = false, fltTerjualOn = false, fltBelumTerjua
 let editDocId = null, histDocId = null, histMutEdit = null, saleEditId = null, saleCreateMutation = null;
 let importRows = [];
 let jualRows = [];
+let mixRows = [];
 let lastSaleImport = null;
 let importJenis = 'keluar';         // pilihan manual masuk/keluar
 let fisikDraft = {};
@@ -390,10 +391,11 @@ function fuzzyFind(nama){
 // ===================== TABS & RENDER =====================
 window.setTab = function(t){
   curTab = t;
-  ['dash','stok','jual','lapjual','imp','mutasi','fisik'].forEach(x => {
+  ['dash','stok','jual','lapjual','imp','campur','mutasi','fisik'].forEach(x => {
     $('tb_'+x).className = 'tab-btn' + (x===t?' act':'');
     $('tab_'+x).style.display = x===t ? 'block':'none';
   });
+  if(t==='campur' && !mixRows.length) resetMixForm(false);
   renderAll();
 };
 
@@ -403,6 +405,7 @@ function renderAll(){
   if(curTab==='dash') renderDash();
   if(curTab==='stok') renderStok();
   if(curTab==='lapjual'){ renderLaporanJual(); renderSaleImportHistory(); renderRekonsiliasi(); }
+  if(curTab==='campur') renderMix();
   if(curTab==='mutasi') renderMutasi();
   if(curTab==='fisik') renderFisik();
   renderRekonBadge();
@@ -2094,6 +2097,217 @@ window.doImport = async function(){
     btn.disabled = false; btn.textContent = '💾 Coba lagi';
   }
 };
+
+// ===================== CAMPUR / PRODUKSI PRODUK =====================
+function blankMixRow(){
+  return { nama:'', qty:'', sat:'' };
+}
+
+function mixRowItem(r){
+  return findExact(r.nama);
+}
+
+function mixRowNormalized(r){
+  const it = mixRowItem(r);
+  if(!it) return null;
+  const sourceQty = parseId(r.qty);
+  const sourceSat = String(r.sat || it.sat || 'kg').trim();
+  const normalized = normalizeStockQty(sourceQty, sourceSat, it.sat || sourceSat);
+  return {
+    it,
+    sourceQty,
+    sourceSat,
+    qty: normalized.qty,
+    sat: normalized.sat,
+    converted: normalized.converted
+  };
+}
+
+window.resetMixForm = function(clearMsg=true){
+  if($('mixTanggal')) $('mixTanggal').value = todayIso();
+  if($('mixNota')) $('mixNota').value = '';
+  if($('mixHasil')) $('mixHasil').value = '';
+  if($('mixQty')) $('mixQty').value = '';
+  mixRows = [blankMixRow(), blankMixRow()];
+  if(clearMsg){
+    if($('mixErr')) $('mixErr').style.display = 'none';
+    if($('mixOk')) $('mixOk').style.display = 'none';
+  }
+  renderMix();
+};
+
+window.addMixRow = function(){
+  mixRows.push(blankMixRow());
+  renderMix();
+};
+
+window.delMixRow = function(i){
+  mixRows.splice(i,1);
+  if(!mixRows.length) mixRows.push(blankMixRow());
+  renderMix();
+};
+
+window.mixRowChanged = function(i, field, value){
+  if(!mixRows[i]) return;
+  mixRows[i][field] = value;
+  if(field === 'nama'){
+    const it = findExact(value);
+    if(it) mixRows[i].sat = it.sat || mixRows[i].sat || 'kg';
+  }
+  renderMix();
+};
+
+window.renderMixSummary = function(){
+  if(!$('mixSummary')) return;
+  const hasil = findExact($('mixHasil').value);
+  const hasilQty = parseId($('mixQty').value);
+  const bahan = mixRows.map(mixRowNormalized).filter(Boolean);
+  const totalBahan = bahan.reduce((s,r)=>s+(parseFloat(r.qty)||0),0);
+  const hasilTxt = hasil && hasilQty>0 ? `${num(hasilQty)} ${hasil.sat||''} ${hasil.nama}` : 'belum lengkap';
+  $('mixSummary').innerHTML = `<span>Hasil: <b>${esc(hasilTxt)}</b></span>
+    <span>Bahan valid: <b>${bahan.length}</b></span>
+    <span>Total qty bahan: <b>${num(totalBahan)}</b></span>`;
+  const hint = $('mixHasilHint');
+  if(hint) hint.innerHTML = hasil ? `Standar satuan hasil: <b>${esc(hasil.sat||'')}</b> · stok sekarang: <b>${num(teoritisOf(hasil))} ${esc(hasil.sat||'')}</b>` : 'Pilih barang hasil dari daftar stok.';
+};
+
+window.renderMix = function(){
+  if(!$('mixBody')) return;
+  if($('mixTanggal') && !$('mixTanggal').value) $('mixTanggal').value = todayIso();
+  $('mixBody').innerHTML = mixRows.map((r,i)=>{
+    const it = findExact(r.nama);
+    const sat = r.sat || (it ? it.sat : '');
+    const available = it ? `${num(teoritisOf(it))} ${esc(it.sat||'')}` : '-';
+    return `<tr>
+      <td><input class="edit-inp ${it?'ok':'warn'}" list="itemList" value="${esc(r.nama)}" placeholder="Pilih bahan..." oninput="mixRowChanged(${i},'nama',this.value)"></td>
+      <td><input class="edit-inp r" inputmode="decimal" value="${esc(r.qty)}" placeholder="0" oninput="mixRowChanged(${i},'qty',this.value)"></td>
+      <td><input class="edit-inp" value="${esc(sat)}" placeholder="${esc(it ? (it.sat||'') : 'kg')}" oninput="mixRowChanged(${i},'sat',this.value)"></td>
+      <td class="r">${available}</td>
+      <td class="r"><button class="icon-btn danger" onclick="delMixRow(${i})">✕</button></td>
+    </tr>`;
+  }).join('');
+  renderMixSummary();
+  renderMixHistory();
+};
+
+function validateMix(){
+  const tanggal = $('mixTanggal').value || todayIso();
+  const noNota = $('mixNota').value.trim();
+  const hasil = findExact($('mixHasil').value);
+  const hasilQty = parseId($('mixQty').value);
+  const errors = [];
+  if(!validIsoDate(tanggal)) errors.push('Tanggal belum benar.');
+  if(!hasil) errors.push('Barang hasil harus dipilih dari daftar stok.');
+  if(hasilQty <= 0) errors.push('Jumlah hasil harus lebih dari 0.');
+
+  const rows = mixRows.map((r,i)=>({ ...mixRowNormalized(r), idx:i, raw:r })).filter(r=>r.raw.nama || r.raw.qty);
+  const bahan = rows.filter(r=>r.it && r.qty > 0);
+  rows.forEach(r => {
+    if(!r.it) errors.push(`Baris bahan ${r.idx+1}: barang belum cocok dengan daftar stok.`);
+    else if(r.sourceQty <= 0) errors.push(`Baris bahan ${r.idx+1}: qty harus lebih dari 0.`);
+  });
+  if(!bahan.length) errors.push('Minimal isi 1 bahan campuran.');
+
+  const seen = new Set();
+  bahan.forEach(r => {
+    if(hasil && r.it.id === hasil.id) errors.push(`Bahan "${r.it.nama}" tidak boleh sama dengan barang hasil.`);
+    if(seen.has(r.it.id)) errors.push(`Bahan "${r.it.nama}" dobel. Gabungkan qty-nya dalam satu baris.`);
+    seen.add(r.it.id);
+  });
+
+  bahan.forEach(r => {
+    const tersedia = teoritisOf(r.it);
+    if(r.qty - tersedia > 0.000001){
+      errors.push(`Stok bahan "${r.it.nama}" tidak cukup. Tersedia ${num(tersedia)} ${r.it.sat||''}, diminta ${num(r.qty)} ${r.sat||''}.`);
+    }
+  });
+
+  return { tanggal, noNota, hasil, hasilQty, bahan, errors };
+}
+
+window.saveMix = async function(){
+  if($('mixErr')) $('mixErr').style.display='none';
+  if($('mixOk')) $('mixOk').style.display='none';
+  const v = validateMix();
+  if(v.errors.length){
+    showMsg('mixErr', v.errors.join(' '), 9000);
+    return;
+  }
+  const bahanTxt = v.bahan.map(r=>`• ${r.it.nama}: ${num(r.qty)} ${r.sat||''}`).join('\n');
+  if(!confirm(`Simpan campuran ini?\n\nHASIL\n• ${v.hasil.nama}: ${num(v.hasilQty)} ${v.hasil.sat||''}\n\nBAHAN KELUAR\n${bahanTxt}`)) return;
+
+  const btn = $('mixSaveBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
+  try {
+    const mixId = `mix-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const noNota = v.noNota || `Campur ${isoToDisp(v.tanggal)}`;
+    const batch = writeBatch(db);
+    const bahanInfo = v.bahan.map(r=>({ itemId:r.it.id, nama:r.it.nama, qty:r.qty, sat:r.sat, sourceQty:r.sourceQty, sourceSat:r.sourceSat }));
+
+    v.bahan.forEach(r => {
+      const mut = {
+        jenis:'keluar',
+        tanggal:v.tanggal,
+        qty:r.qty,
+        sat:r.sat,
+        pihak:'Campur Produk',
+        noNota,
+        ref:`${mixId}|bahan|${r.it.id}`,
+        mixId,
+        mixRole:'bahan',
+        mixTargetId:v.hasil.id,
+        mixTargetNama:v.hasil.nama
+      };
+      batch.update(doc(db, COLL, r.it.id), { mutasi:[...(r.it.mutasi||[]), mut] });
+    });
+
+    const hasilMut = {
+      jenis:'masuk',
+      tanggal:v.tanggal,
+      qty:v.hasilQty,
+      sat:v.hasil.sat || 'kg',
+      pihak:'Campur Produk',
+      noNota,
+      ref:`${mixId}|hasil|${v.hasil.id}`,
+      mixId,
+      mixRole:'hasil',
+      mixBahan:bahanInfo
+    };
+    batch.update(doc(db, COLL, v.hasil.id), { mutasi:[...(v.hasil.mutasi||[]), hasilMut] });
+    await batch.commit();
+    await auditLog('campur_produk', { mixId, tanggal:v.tanggal, hasil:{ itemId:v.hasil.id, nama:v.hasil.nama, qty:v.hasilQty, sat:v.hasil.sat }, bahan:bahanInfo, noNota });
+    showMsg('mixOk', `✔ Campuran disimpan. ${v.bahan.length} bahan dikurangi dan ${v.hasil.nama} ditambah.`, 7000);
+    resetMixForm(false);
+  } catch(e){
+    showMsg('mixErr','Gagal menyimpan campuran: '+e.message, 9000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 Simpan campuran';
+  }
+};
+
+function renderMixHistory(){
+  if(!$('mixHistory')) return;
+  const grouped = {};
+  allMutasi().filter(m=>m.mixId).forEach(m => {
+    if(!grouped[m.mixId]) grouped[m.mixId] = { mixId:m.mixId, tanggal:m.tanggal, hasil:null, bahan:[] };
+    if(String(m.tanggal||'') > String(grouped[m.mixId].tanggal||'')) grouped[m.mixId].tanggal = m.tanggal;
+    if(m.mixRole === 'hasil') grouped[m.mixId].hasil = m;
+    if(m.mixRole === 'bahan') grouped[m.mixId].bahan.push(m);
+  });
+  const list = Object.values(grouped).sort((a,b)=>String(b.tanggal).localeCompare(String(a.tanggal))).slice(0,20);
+  $('mixHistory').innerHTML = list.length ? list.map(g => {
+    const h = g.hasil;
+    const bahan = g.bahan.map(b=>`${esc(b.itemNama)} ${num(b.qty)} ${esc(b.sat||'')}`).join('<br>');
+    return `<tr>
+      <td>${isoToDisp(g.tanggal)}</td>
+      <td>${h ? esc(h.itemNama) : '<span style="color:#aaa">hasil tidak ditemukan</span>'}</td>
+      <td style="font-size:11.5px;color:#666">${bahan || '-'}</td>
+      <td class="r">${h ? `${num(h.qty)} ${esc(h.sat||'')}` : '-'}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="4" class="empty">Belum ada campuran produk.</td></tr>';
+}
 
 // ===================== SEMUA MUTASI (BULK EDIT) =====================
 function allMutasi(){

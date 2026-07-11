@@ -45,6 +45,7 @@
   <button class="tab-btn" id="tb_jual" onclick="setTab('jual')">💵 Penjualan</button>
   <button class="tab-btn" id="tb_lapjual" onclick="setTab('lapjual')">📈 Laporan Jual</button>
   <button class="tab-btn" id="tb_imp" onclick="setTab('imp')">📋 Import Mutasi</button>
+  <button class="tab-btn" id="tb_campur" onclick="setTab('campur')">🧪 Campur Produk</button>
   <button class="tab-btn" id="tb_mutasi" onclick="setTab('mutasi')">🧾 Semua Mutasi</button>
   <button class="tab-btn" id="tb_fisik" onclick="setTab('fisik')">✏️ Hitung Fisik</button>
 </div>
@@ -312,6 +313,53 @@
     </div>
     <div class="err-msg" id="impErr"></div>
     <div id="impPreview" style="margin-top:10px"></div>
+  </div>
+</div>
+
+<!-- ====== CAMPUR PRODUK ====== -->
+<div id="tab_campur" style="display:none">
+  <div class="card">
+    <div class="card-title">🧪 Campur / Produksi Barang</div>
+    <div class="hint" style="margin:0 0 10px">Pakai fitur ini kalau beberapa bahan dicampur lalu menjadi barang lain. Saat disimpan, stok bahan otomatis berkurang dan stok hasil otomatis bertambah dalam satu catatan.</div>
+    <div class="e-grid">
+      <div class="field"><label>Tanggal</label><input type="date" id="mixTanggal"></div>
+      <div class="field"><label>No. produksi / catatan</label><input type="text" id="mixNota" placeholder="Opsional, contoh: MIX-001"></div>
+      <div class="field"><label>Barang hasil</label><input type="text" id="mixHasil" list="itemList" placeholder="Pilih barang hasil..." oninput="renderMix()"></div>
+      <div class="field"><label>Jumlah hasil</label><input type="text" inputmode="decimal" id="mixQty" placeholder="Contoh: 10" oninput="renderMixSummary()"></div>
+    </div>
+    <div class="hint" id="mixHasilHint"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Bahan campuran
+      <span class="spacer"></span>
+      <button class="btn btn-line btn-sm" onclick="addMixRow()">➕ Tambah bahan</button>
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>Bahan</th>
+        <th class="r" style="width:130px">Qty</th>
+        <th style="width:80px">Satuan</th>
+        <th class="r" style="width:110px">Stok tersedia</th>
+        <th style="width:48px"></th>
+      </tr></thead>
+      <tbody id="mixBody"></tbody>
+    </table></div>
+    <div class="mut-sum" id="mixSummary"></div>
+    <div class="err-msg" id="mixErr"></div>
+    <div class="ok-msg" id="mixOk"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
+      <button class="btn btn-line" onclick="resetMixForm()">Reset</button>
+      <button class="btn btn-t" onclick="saveMix()" id="mixSaveBtn">💾 Simpan campuran</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Riwayat campuran terakhir</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Tanggal</th><th>Hasil</th><th>Bahan</th><th class="r">Qty hasil</th></tr></thead>
+      <tbody id="mixHistory"></tbody>
+    </table></div>
   </div>
 </div>
 
