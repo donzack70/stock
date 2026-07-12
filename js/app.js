@@ -162,7 +162,7 @@ let items = [];
 let sales = [];
 let saleImports = [];
 let curTab = 'dash';
-let fltMinusOn = false, fisBelumOn = false, fltTerjualOn = false, fltBelumTerjualOn = false;
+let fltMinusOn = false, fisBelumOn = false;
 let editDocId = null, histDocId = null, histMutEdit = null, saleEditId = null, saleCreateMutation = null;
 let importRows = [];
 let jualRows = [];
@@ -181,7 +181,6 @@ const fisikKgOf = it => it.fisik ? (parseFloat(it.fisik.drum)||0)*(parseFloat(it
 const selisihOf = it => { const f = fisikKgOf(it); return f===null ? null : Math.round((f - teoritisOf(it))*100)/100; };
 const hargaOf = it => parseFloat(it.harga)||0;
 const nilaiOf = it => teoritisOf(it) * hargaOf(it);
-const soldItemIds = () => new Set(sales.map(s=>s.itemId).filter(Boolean));
 
 // ===================== FIREBASE INIT =====================
 const fbApp = initializeApp(firebaseConfig);
@@ -250,8 +249,6 @@ function prepareFreshSessionView(){
   mutPage = 1;
   fltMinusOn = false;
   fisBelumOn = false;
-  fltTerjualOn = false;
-  fltBelumTerjualOn = false;
   stokEditMode = false;
   editDocId = null;
   histDocId = null;
@@ -268,7 +265,7 @@ function prepareFreshSessionView(){
   setValIfExists('mutPageSize','50');
   setValIfExists('mixTanggal', todayIso());
 
-  ['fltMinus','fltTerjual','fltBelumTerjual','fisBelum'].forEach(id=>{
+  ['fltMinus','fisBelum'].forEach(id=>{
     const el=$(id);
     if(el) el.classList.remove('active');
   });
@@ -648,20 +645,6 @@ function renderDash(){
 
 // ===================== TAB STOK =====================
 window.toggleFltMinus = function(){ fltMinusOn = !fltMinusOn; $('fltMinus').classList.toggle('active', fltMinusOn); renderStok(); };
-window.toggleFltTerjual = function(){
-  fltTerjualOn = !fltTerjualOn;
-  if(fltTerjualOn) fltBelumTerjualOn = false;
-  $('fltTerjual').classList.toggle('active', fltTerjualOn);
-  $('fltBelumTerjual').classList.toggle('active', fltBelumTerjualOn);
-  renderStok();
-};
-window.toggleFltBelumTerjual = function(){
-  fltBelumTerjualOn = !fltBelumTerjualOn;
-  if(fltBelumTerjualOn) fltTerjualOn = false;
-  $('fltTerjual').classList.toggle('active', fltTerjualOn);
-  $('fltBelumTerjual').classList.toggle('active', fltBelumTerjualOn);
-  renderStok();
-};
 
 function filteredItems(cariId, katId, minusOnly){
   const cari = $(cariId).value.trim().toLowerCase();
@@ -670,11 +653,6 @@ function filteredItems(cariId, katId, minusOnly){
   if(cari) list = list.filter(it => it.nama.toLowerCase().includes(cari));
   if(kat) list = list.filter(it => it.kat === kat);
   if(minusOnly) list = list.filter(it => teoritisOf(it) < -0.01);
-  if(cariId==='fltCari'){
-    const sold = soldItemIds();
-    if(fltTerjualOn) list = list.filter(it => sold.has(it.id));
-    if(fltBelumTerjualOn) list = list.filter(it => !sold.has(it.id));
-  }
   return list;
 }
 
