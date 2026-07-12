@@ -2289,14 +2289,7 @@ window.saveMix = async function(){
 
 function renderMixHistory(){
   if(!$('mixHistory')) return;
-  const grouped = {};
-  allMutasi().filter(m=>m.mixId).forEach(m => {
-    if(!grouped[m.mixId]) grouped[m.mixId] = { mixId:m.mixId, tanggal:m.tanggal, hasil:null, bahan:[] };
-    if(String(m.tanggal||'') > String(grouped[m.mixId].tanggal||'')) grouped[m.mixId].tanggal = m.tanggal;
-    if(m.mixRole === 'hasil') grouped[m.mixId].hasil = m;
-    if(m.mixRole === 'bahan') grouped[m.mixId].bahan.push(m);
-  });
-  const list = Object.values(grouped).sort((a,b)=>String(b.tanggal).localeCompare(String(a.tanggal))).slice(0,20);
+  const list = mixGroups().slice(0,20);
   $('mixHistory').innerHTML = list.length ? list.map(g => {
     const h = g.hasil;
     const bahan = g.bahan.map(b=>`${esc(b.itemNama)} ${num(b.qty)} ${esc(b.sat||'')}`).join('<br>');
@@ -2305,10 +2298,68 @@ function renderMixHistory(){
       <td>${h ? esc(h.itemNama) : '<span style="color:#aaa">hasil tidak ditemukan</span>'}</td>
       <td style="font-size:11.5px;color:#666">${bahan || '-'}</td>
       <td class="r">${h ? `${num(h.qty)} ${esc(h.sat||'')}` : '-'}</td>
-      <td class="r"><button class="icon-btn danger" onclick="undoMix('${g.mixId}')" title="Batalkan campuran ini">Batalkan</button></td>
+      <td class="r">
+        <button class="icon-btn" onclick="openMixDetail('${g.mixId}')" title="Lihat detail campuran">Detail</button>
+        <button class="icon-btn danger" onclick="undoMix('${g.mixId}')" title="Batalkan campuran ini">Batalkan</button>
+      </td>
     </tr>`;
   }).join('') : '<tr><td colspan="5" class="empty">Belum ada campuran produk.</td></tr>';
 }
+
+function mixGroups(){
+  const grouped = {};
+  allMutasi().filter(m=>m.mixId).forEach(m => {
+    if(!grouped[m.mixId]) grouped[m.mixId] = { mixId:m.mixId, tanggal:m.tanggal, noNota:m.noNota||'', hasil:null, bahan:[] };
+    if(String(m.tanggal||'') > String(grouped[m.mixId].tanggal||'')) grouped[m.mixId].tanggal = m.tanggal;
+    if(!grouped[m.mixId].noNota && m.noNota) grouped[m.mixId].noNota = m.noNota;
+    if(m.mixRole === 'hasil') grouped[m.mixId].hasil = m;
+    if(m.mixRole === 'bahan') grouped[m.mixId].bahan.push(m);
+  });
+  return Object.values(grouped).sort((a,b)=>String(b.tanggal).localeCompare(String(a.tanggal)));
+}
+
+window.openMixDetail = function(mixId){
+  const g = mixGroups().find(x=>x.mixId===mixId);
+  if(!g){
+    showMsg('mixErr','Detail campuran tidak ditemukan atau sudah dibatalkan.', 6000);
+    return;
+  }
+  const h = g.hasil;
+  $('mixDetailTitle').textContent = 'Detail Campuran';
+  $('mixDetailSub').textContent = `${isoToDisp(g.tanggal)}${g.noNota ? ' · '+g.noNota : ''}`;
+  const hasilHtml = h ? `<tr>
+    <td>${esc(h.itemNama)}</td>
+    <td class="r">${num(h.qty)} ${esc(h.sat||'')}</td>
+    <td>${esc(h.noNota||g.noNota||'-')}</td>
+  </tr>` : '<tr><td colspan="3" class="empty">Mutasi hasil tidak ditemukan.</td></tr>';
+  const bahanHtml = g.bahan.length ? g.bahan.map(b=>`<tr>
+    <td>${esc(b.itemNama)}</td>
+    <td class="r">${num(b.qty)} ${esc(b.sat||'')}</td>
+    <td>${esc(b.noNota||g.noNota||'-')}</td>
+  </tr>`).join('') : '<tr><td colspan="3" class="empty">Mutasi bahan tidak ditemukan.</td></tr>';
+  $('mixDetailBody').innerHTML = `
+    <div class="mut-sum">
+      <span>Kode campuran: <b>${esc(g.mixId)}</b></span>
+      <span>Tanggal: <b>${isoToDisp(g.tanggal)}</b></span>
+      <span>Catatan: <b>${esc(g.noNota||'-')}</b></span>
+    </div>
+    <div class="card-title" style="margin-top:12px;color:#1e7a45">Hasil masuk</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Barang hasil</th><th class="r">Qty</th><th>Catatan</th></tr></thead>
+      <tbody>${hasilHtml}</tbody>
+    </table></div>
+    <div class="card-title" style="margin-top:16px;color:#b7600a">Bahan keluar</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Bahan</th><th class="r">Qty</th><th>Catatan</th></tr></thead>
+      <tbody>${bahanHtml}</tbody>
+    </table></div>
+    <div class="hint" style="margin-top:10px">Kalau campuran ini salah, tutup detail lalu klik tombol <b>Batalkan</b> di baris riwayat campuran.</div>`;
+  $('mixDetailModal').classList.add('show');
+};
+
+window.closeMixDetail = function(){
+  $('mixDetailModal').classList.remove('show');
+};
 
 window.undoMix = async function(mixId){
   const related = allMutasi().filter(m => m.mixId === mixId);
