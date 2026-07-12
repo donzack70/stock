@@ -195,6 +195,7 @@ onAuthStateChanged(auth, user => {
     $('gate').style.display='none'; $('app').style.display='block';
     $('userBox').style.display='inline'; $('userBox').textContent = user.email;
     $('logoutBtn').style.display='inline-block';
+    prepareFreshSessionView();
     updateJenisSeg();
     startListening();
   } else {
@@ -217,6 +218,83 @@ window.doLogin = async function(){
   btn.disabled = false; btn.textContent = 'Masuk';
 };
 window.doLogout = function(){ if(auth) signOut(auth); };
+
+function setValIfExists(id, value=''){
+  const el = $(id);
+  if(el) el.value = value;
+}
+
+function setHtmlIfExists(id, html=''){
+  const el = $(id);
+  if(el) el.innerHTML = html;
+}
+
+function hideIfExists(id){
+  const el = $(id);
+  if(el) el.style.display = 'none';
+}
+
+function removeShowIfExists(id){
+  const el = $(id);
+  if(el) el.classList.remove('show');
+}
+
+function prepareFreshSessionView(){
+  curTab = 'dash';
+  importRows = [];
+  jualRows = [];
+  mixRows = [];
+  fisikDraft = {};
+  stokDraft = {};
+  mutDraft = {};
+  mutPage = 1;
+  fltMinusOn = false;
+  fisBelumOn = false;
+  fltTerjualOn = false;
+  fltBelumTerjualOn = false;
+  stokEditMode = false;
+  editDocId = null;
+  histDocId = null;
+  histMutEdit = null;
+  saleEditId = null;
+  saleCreateMutation = null;
+  importJenis = 'keluar';
+
+  [
+    'fltCari','fltKat','fisCari','fisKat','lapJualCari','lapJualDari','lapJualSampai',
+    'mutCari','mutJenis','mutDari','mutSampai','jualTsv','impTsv','hImpTsv','mImpTsv',
+    'mixNota','mixHasil','mixQty'
+  ].forEach(id=>setValIfExists(id,''));
+  setValIfExists('mutPageSize','50');
+  setValIfExists('mixTanggal', todayIso());
+
+  ['fltMinus','fltTerjual','fltBelumTerjual','fisBelum'].forEach(id=>{
+    const el=$(id);
+    if(el) el.classList.remove('active');
+  });
+
+  [
+    'jualPreview','impPreview','hImpPrev','mImpPrev','mixBody','mixSummary','mixHasilHint',
+    'mixDetailBody','saleImportHistory','rekonContent'
+  ].forEach(id=>setHtmlIfExists(id,''));
+  ['jualErr','impErr','hImpErr','mImpErr','mixErr','mixOk','stokOk','backupOk','backupErr'].forEach(hideIfExists);
+  ['hImpBody','mImpBody','stokEdit','rekonWrap','saleImportHistoryWrap'].forEach(hideIfExists);
+  const stokNormal = $('stokNormal');
+  if(stokNormal) stokNormal.style.display = 'block';
+  const stokEditBtn = $('stokEditBtn');
+  if(stokEditBtn) stokEditBtn.textContent = '✏️ Edit massal';
+  const hImpToggle = $('hImpToggle');
+  if(hImpToggle) hImpToggle.textContent = '💰 Import harga';
+  const mImpToggle = $('mImpToggle');
+  if(mImpToggle) mImpToggle.textContent = '📥 Import master (paste)';
+  const rekonToggle = $('rekonToggle');
+  if(rekonToggle) rekonToggle.textContent = 'Buka pemeriksaan';
+  const saleHistoryToggle = $('saleHistoryToggle');
+  if(saleHistoryToggle) saleHistoryToggle.textContent = 'Lihat riwayat';
+
+  ['saleModal','editModal','histModal','histMutModal','mixDetailModal'].forEach(removeShowIfExists);
+  resetMixForm(false);
+}
 
 function startListening(){
   if(unsub) unsub();
