@@ -274,7 +274,7 @@ function prepareFreshSessionView(){
 
   [
     'jualPreview','impPreview','hImpPrev','mImpPrev','mixBody','mixSummary','mixHasilHint',
-    'mixDetailBody','saleImportHistory','rekonContent','lapStokHead','lapStokBody','lapStokSum'
+    'mixDetailBody','saleImportHistory','rekonContent','lapStokBody','lapStokSum'
   ].forEach(id=>setHtmlIfExists(id,''));
   ['jualErr','impErr','hImpErr','mImpErr','mixErr','mixOk','stokOk','lapStokOk','backupOk','backupErr'].forEach(hideIfExists);
   ['hImpBody','mImpBody','stokEdit','rekonWrap','saleImportHistoryWrap'].forEach(hideIfExists);
@@ -739,28 +739,34 @@ window.renderLaporanStok = function(){
     <span style="color:#1e7a45">Total masuk: <b>${num(totalMasuk)}</b></span>
     <span style="color:#b7600a">Total keluar: <b>${num(totalKeluar)}</b></span>
     <span>Net: <b>${num(totalMasuk-totalKeluar)}</b></span>`;
-  $('lapStokHead').innerHTML = `<tr>
-    <th>Barang</th>
-    <th>Kategori</th>
-    <th class="r">Total masuk</th>
-    <th class="r">Total keluar</th>
-    <th class="r">Net</th>
-    ${dates.map(d=>`<th class="r">${isoToDisp(d)}<br><span style="color:#1e7a45">Masuk</span></th><th class="r">${isoToDisp(d)}<br><span style="color:#b7600a">Keluar</span></th>`).join('')}
-  </tr>`;
   $('lapStokBody').innerHTML = rows.length ? rows.map(r=>{
     const it = r.it;
-    return `<tr>
-      <td class="nama-cell">${esc(it.nama)}<span class="kat">${esc(it.sat||'kg')}</span></td>
-      <td>${esc(it.kat||'')}</td>
-      <td class="r" style="color:#1e7a45;font-weight:700">${r.totalMasuk?num(r.totalMasuk):'-'}</td>
-      <td class="r" style="color:#b7600a;font-weight:700">${r.totalKeluar?num(r.totalKeluar):'-'}</td>
-      <td class="r ${r.net<0?'neg':r.net>0?'pos':'zero'}">${r.net?num(r.net):'0'}</td>
-      ${dates.map(d=>{
-        const v = r.byDate[d] || { masuk:0, keluar:0 };
-        return `<td class="r" style="color:#1e7a45">${v.masuk?num(v.masuk):'-'}</td><td class="r" style="color:#b7600a">${v.keluar?num(v.keluar):'-'}</td>`;
-      }).join('')}
-    </tr>`;
-  }).join('') : `<tr><td colspan="${5 + dates.length*2}" class="empty">${items.length?'Tidak ada mutasi stok yang cocok dengan filter.':'Belum ada data stok.'}</td></tr>`;
+    const rowDates = Object.keys(r.byDate).sort();
+    const lines = rowDates.length ? rowDates.map(d=>{
+      const v = r.byDate[d];
+      const net = (v.masuk||0) - (v.keluar||0);
+      return `<tr>
+        <td style="width:92px">${isoToDisp(d)}</td>
+        <td class="r" style="color:#1e7a45">${v.masuk?num(v.masuk):'-'}</td>
+        <td class="r" style="color:#b7600a">${v.keluar?num(v.keluar):'-'}</td>
+        <td class="r ${net<0?'neg':net>0?'pos':'zero'}">${net?num(net):'0'}</td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="4" class="empty">Tidak ada gerak stok di rentang ini.</td></tr>`;
+    return `<div style="border:1px solid #eee;border-radius:10px;margin-bottom:10px;overflow:hidden;background:#fff">
+      <div style="display:flex;gap:10px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;padding:10px 12px;background:#fafafa;border-bottom:1px solid #eee">
+        <div class="nama-cell">${esc(it.nama)}<span class="kat">${esc(it.kat||'')} · ${esc(it.sat||'kg')}</span></div>
+        <div class="mut-sum" style="margin:0;padding:4px 8px">
+          <span style="color:#1e7a45">Masuk: <b>${num(r.totalMasuk)}</b></span>
+          <span style="color:#b7600a">Keluar: <b>${num(r.totalKeluar)}</b></span>
+          <span>Net: <b class="${r.net<0?'neg':r.net>0?'pos':''}">${num(r.net)}</b></span>
+        </div>
+      </div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Tanggal</th><th class="r">Masuk</th><th class="r">Keluar</th><th class="r">Net</th></tr></thead>
+        <tbody>${lines}</tbody>
+      </table></div>
+    </div>`;
+  }).join('') : `<div class="empty">${items.length?'Tidak ada mutasi stok yang cocok dengan filter.':'Belum ada data stok.'}</div>`;
 };
 
 // ===================== EDIT MASSAL MASTER =====================
@@ -2920,19 +2926,23 @@ window.copyStok = function(){
 
 window.copyLaporanStok = function(){
   const report = laporanStokRows();
-  const { rows, dates } = report;
+  const { rows } = report;
   if(!rows.length){ alert('Tidak ada data laporan stok untuk dicopy.'); return; }
   const fmtN = v => String(Math.round((parseFloat(v)||0)*100)/100).replace('.',',');
-  const header = ['Nama','Kategori','Sat','Total Masuk','Total Keluar','Net']
-    .concat(dates.flatMap(d=>[`Masuk ${isoToDisp(d)}`, `Keluar ${isoToDisp(d)}`])).join('\t');
-  const outRows = rows.map(r => {
+  const header = ['Nama','Kategori','Sat','Tanggal','Masuk','Keluar','Net','Total Masuk Barang','Total Keluar Barang','Net Barang'].join('\t');
+  const outRows = [];
+  rows.forEach(r => {
     const it = r.it;
-    return [
-      it.nama, it.kat||'', it.sat||'kg', fmtN(r.totalMasuk), fmtN(r.totalKeluar), fmtN(r.net)
-    ].concat(dates.flatMap(d=>{
+    const rowDates = Object.keys(r.byDate).sort();
+    if(!rowDates.length){
+      outRows.push([it.nama, it.kat||'', it.sat||'kg', '', '', '', '', fmtN(r.totalMasuk), fmtN(r.totalKeluar), fmtN(r.net)].join('\t'));
+      return;
+    }
+    rowDates.forEach(d => {
       const v = r.byDate[d] || { masuk:0, keluar:0 };
-      return [v.masuk?fmtN(v.masuk):'', v.keluar?fmtN(v.keluar):''];
-    })).join('\t');
+      const net = (v.masuk||0) - (v.keluar||0);
+      outRows.push([it.nama, it.kat||'', it.sat||'kg', isoToDisp(d), v.masuk?fmtN(v.masuk):'', v.keluar?fmtN(v.keluar):'', fmtN(net), fmtN(r.totalMasuk), fmtN(r.totalKeluar), fmtN(r.net)].join('\t'));
+    });
   });
   const tsv = header + '\n' + outRows.join('\n');
   navigator.clipboard.writeText(tsv).then(()=>showMsg('lapStokOk','✔ Laporan stok berhasil dicopy.'))

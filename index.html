@@ -225,7 +225,7 @@
       <span class="spacer"></span>
       <button class="btn btn-line btn-sm" onclick="copyLaporanStok()">📋 Copy laporan</button>
     </div>
-    <div class="hint" style="margin:0 0 10px">Laporan baca-saja untuk melihat gerak stok per tanggal. Satu baris = satu barang, kolom tanggal menampilkan total masuk dan keluar di tanggal itu.</div>
+    <div class="hint" style="margin:0 0 10px">Laporan baca-saja untuk melihat gerak stok ringkas per barang. Tanpa detail nota, supaya lebih cepat dibaca.</div>
     <div class="filter-row">
       <input type="text" id="lapStokCari" placeholder="Cari nama barang..." oninput="renderLaporanStok()">
       <select id="lapStokKat" onchange="renderLaporanStok()"><option value="">Semua kategori</option></select>
@@ -244,10 +244,7 @@
       </select>
     </div>
     <div class="mut-sum" id="lapStokSum"></div>
-    <div class="tbl-wrap"><table>
-      <thead id="lapStokHead"></thead>
-      <tbody id="lapStokBody"></tbody>
-    </table></div>
+    <div id="lapStokBody"></div>
     <div class="ok-msg" id="lapStokOk"></div>
   </div>
 </div>
