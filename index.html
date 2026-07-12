@@ -42,6 +42,7 @@
 <div class="tabbar">
   <button class="tab-btn act" id="tb_dash" onclick="setTab('dash')">📊 Dashboard</button>
   <button class="tab-btn" id="tb_stok" onclick="setTab('stok')">📦 Stok</button>
+  <button class="tab-btn" id="tb_lapstok" onclick="setTab('lapstok')">📄 Laporan Stok</button>
   <button class="tab-btn" id="tb_jual" onclick="setTab('jual')">💵 Penjualan</button>
   <button class="tab-btn" id="tb_lapjual" onclick="setTab('lapjual')">📈 Laporan Jual</button>
   <button class="tab-btn" id="tb_imp" onclick="setTab('imp')">📋 Import Mutasi</button>
@@ -214,6 +215,49 @@
     </div>
 
     <div class="ok-msg" id="stokOk">✔ Berhasil dicopy! Langsung paste (Ctrl+V) di Google Sheet.</div>
+  </div>
+</div>
+
+<!-- ====== LAPORAN STOK ====== -->
+<div id="tab_lapstok" style="display:none">
+  <div class="card">
+    <div class="card-title">📄 Laporan Stok
+      <span class="spacer"></span>
+      <button class="btn btn-line btn-sm" onclick="copyLaporanStok()">📋 Copy laporan</button>
+    </div>
+    <div class="hint" style="margin:0 0 10px">Laporan baca-saja untuk cek stok. Angka teoritis dihitung dari stok awal + masuk − keluar, jadi tidak mengubah data apa pun.</div>
+    <div class="filter-row">
+      <input type="text" id="lapStokCari" placeholder="Cari nama barang..." oninput="renderLaporanStok()">
+      <select id="lapStokKat" onchange="renderLaporanStok()"><option value="">Semua kategori</option></select>
+      <select id="lapStokStatus" onchange="renderLaporanStok()">
+        <option value="">Semua status stok</option>
+        <option value="ada">Stok ada (&gt; 0)</option>
+        <option value="nol">Stok nol</option>
+        <option value="minus">Stok minus</option>
+      </select>
+      <select id="lapStokSort" onchange="renderLaporanStok()">
+        <option value="nama">Urut nama</option>
+        <option value="nilai_desc">Nilai terbesar</option>
+        <option value="stok_asc">Stok terkecil</option>
+        <option value="keluar_desc">Keluar terbanyak</option>
+      </select>
+    </div>
+    <div class="mut-sum" id="lapStokSum"></div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>Barang</th>
+        <th>Kategori</th>
+        <th class="r">Awal</th>
+        <th class="r">Masuk</th>
+        <th class="r">Keluar</th>
+        <th class="r">Teoritis</th>
+        <th class="r">Harga</th>
+        <th class="r">Nilai</th>
+        <th>Status</th>
+      </tr></thead>
+      <tbody id="lapStokBody"></tbody>
+    </table></div>
+    <div class="ok-msg" id="lapStokOk"></div>
   </div>
 </div>
 

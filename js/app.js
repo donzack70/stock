@@ -258,10 +258,11 @@ function prepareFreshSessionView(){
   importJenis = 'keluar';
 
   [
-    'fltCari','fltKat','fisCari','fisKat','lapJualCari','lapJualDari','lapJualSampai',
+    'fltCari','fltKat','fisCari','fisKat','lapStokCari','lapStokKat','lapStokStatus','lapJualCari','lapJualDari','lapJualSampai',
     'mutCari','mutJenis','mutDari','mutSampai','jualTsv','impTsv','hImpTsv','mImpTsv',
     'mixNota','mixHasil','mixQty'
   ].forEach(id=>setValIfExists(id,''));
+  setValIfExists('lapStokSort','nama');
   setValIfExists('mutPageSize','50');
   setValIfExists('mixTanggal', todayIso());
 
@@ -272,9 +273,9 @@ function prepareFreshSessionView(){
 
   [
     'jualPreview','impPreview','hImpPrev','mImpPrev','mixBody','mixSummary','mixHasilHint',
-    'mixDetailBody','saleImportHistory','rekonContent'
+    'mixDetailBody','saleImportHistory','rekonContent','lapStokBody','lapStokSum'
   ].forEach(id=>setHtmlIfExists(id,''));
-  ['jualErr','impErr','hImpErr','mImpErr','mixErr','mixOk','stokOk','backupOk','backupErr'].forEach(hideIfExists);
+  ['jualErr','impErr','hImpErr','mImpErr','mixErr','mixOk','stokOk','lapStokOk','backupOk','backupErr'].forEach(hideIfExists);
   ['hImpBody','mImpBody','stokEdit','rekonWrap','saleImportHistoryWrap'].forEach(hideIfExists);
   const stokNormal = $('stokNormal');
   if(stokNormal) stokNormal.style.display = 'block';
@@ -466,7 +467,7 @@ function fuzzyFind(nama){
 // ===================== TABS & RENDER =====================
 window.setTab = function(t){
   curTab = t;
-  ['dash','stok','jual','lapjual','imp','campur','mutasi','fisik'].forEach(x => {
+  ['dash','stok','lapstok','jual','lapjual','imp','campur','mutasi','fisik'].forEach(x => {
     $('tb_'+x).className = 'tab-btn' + (x===t?' act':'');
     $('tab_'+x).style.display = x===t ? 'block':'none';
   });
@@ -479,6 +480,7 @@ function renderAll(){
   renderKatOptions();
   if(curTab==='dash') renderDash();
   if(curTab==='stok') renderStok();
+  if(curTab==='lapstok') renderLaporanStok();
   if(curTab==='lapjual'){ renderLaporanJual(); renderSaleImportHistory(); renderRekonsiliasi(); }
   if(curTab==='campur') renderMix();
   if(curTab==='mutasi') renderMutasi();
@@ -489,7 +491,7 @@ function renderAll(){
 
 function renderKatOptions(){
   const kats = [...new Set(items.map(it=>it.kat).filter(Boolean))].sort();
-  ['fltKat','fisKat'].forEach(id => {
+  ['fltKat','fisKat','lapStokKat'].forEach(id => {
     const sel = $(id); const cur = sel.value;
     sel.innerHTML = '<option value="">Semua kategori</option>' + kats.map(k=>`<option${k===cur?' selected':''}>${esc(k)}</option>`).join('');
   });
@@ -683,6 +685,66 @@ window.renderStok = function(){
       </td>
     </tr>`;
   }).join('');
+};
+
+// ===================== LAPORAN STOK =====================
+function laporanStokRows(){
+  const cari = $('lapStokCari') ? $('lapStokCari').value.trim().toLowerCase() : '';
+  const kat = $('lapStokKat') ? $('lapStokKat').value : '';
+  const status = $('lapStokStatus') ? $('lapStokStatus').value : '';
+  const sort = $('lapStokSort') ? $('lapStokSort').value : 'nama';
+  let list = [...items];
+  if(cari) list = list.filter(it => String(it.nama||'').toLowerCase().includes(cari));
+  if(kat) list = list.filter(it => it.kat === kat);
+  if(status === 'ada') list = list.filter(it => teoritisOf(it) > 0.01);
+  if(status === 'nol') list = list.filter(it => Math.abs(teoritisOf(it)) <= 0.01);
+  if(status === 'minus') list = list.filter(it => teoritisOf(it) < -0.01);
+  list.sort((a,b)=>{
+    if(sort === 'nilai_desc') return nilaiOf(b) - nilaiOf(a) || String(a.nama||'').localeCompare(String(b.nama||''));
+    if(sort === 'stok_asc') return teoritisOf(a) - teoritisOf(b) || String(a.nama||'').localeCompare(String(b.nama||''));
+    if(sort === 'keluar_desc') return sumMut(b,'keluar') - sumMut(a,'keluar') || String(a.nama||'').localeCompare(String(b.nama||''));
+    return String(a.nama||'').localeCompare(String(b.nama||''));
+  });
+  return list;
+}
+
+window.renderLaporanStok = function(){
+  if(!$('lapStokBody')) return;
+  const list = laporanStokRows();
+  const totalAwal = list.reduce((s,it)=>s+(parseFloat(it.stokAwal)||0),0);
+  const totalMasuk = list.reduce((s,it)=>s+sumMut(it,'masuk'),0);
+  const totalKeluar = list.reduce((s,it)=>s+sumMut(it,'keluar'),0);
+  const totalTeo = list.reduce((s,it)=>s+teoritisOf(it),0);
+  const totalNilai = list.reduce((s,it)=>s+nilaiOf(it),0);
+  const minus = list.filter(it=>teoritisOf(it)<-0.01).length;
+  const nol = list.filter(it=>Math.abs(teoritisOf(it))<=0.01).length;
+  $('lapStokSum').innerHTML = `<span>Barang: <b>${list.length}</b></span>
+    <span>Awal: <b>${num(totalAwal)}</b></span>
+    <span style="color:#1e7a45">Masuk: <b>${num(totalMasuk)}</b></span>
+    <span style="color:#b7600a">Keluar: <b>${num(totalKeluar)}</b></span>
+    <span>Teoritis: <b>${num(totalTeo)}</b></span>
+    <span>Nilai: <b>${rp(totalNilai)}</b></span>
+    <span class="${minus?'neg':''}">Minus: <b>${minus}</b></span>
+    <span>Nol: <b>${nol}</b></span>`;
+  $('lapStokBody').innerHTML = list.length ? list.map(it=>{
+    const masuk = sumMut(it,'masuk'), keluar = sumMut(it,'keluar'), teo = teoritisOf(it);
+    const isi = parseFloat(it.isiDrum)||0;
+    const harga = hargaOf(it), nilai = nilaiOf(it);
+    const status = teo < -0.01 ? '<span class="st st-selisih">MINUS</span>'
+      : Math.abs(teo) <= 0.01 ? '<span class="st st-belum">NOL</span>'
+      : '<span class="st st-cocok">ADA</span>';
+    return `<tr>
+      <td class="nama-cell">${esc(it.nama)}<span class="kat">${esc(it.sat||'kg')}${isi>0?' · isi/drum '+num(isi):''}</span></td>
+      <td>${esc(it.kat||'')}</td>
+      <td class="r">${num(it.stokAwal||0)}</td>
+      <td class="r" style="color:#1e7a45">${masuk?num(masuk):'-'}</td>
+      <td class="r" style="color:#b7600a">${keluar?num(keluar):'-'}</td>
+      <td class="r ${teo<-0.01?'neg':''}" style="font-weight:700">${num(teo)}${isi>0?`<span class="drum-note">${drumStr(teo,isi)}</span>`:''}</td>
+      <td class="r">${harga?rp(harga):'<span class="zero">-</span>'}</td>
+      <td class="r">${harga?rp(nilai):'<span class="zero">-</span>'}</td>
+      <td>${status}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="9" class="empty">${items.length?'Tidak ada stok yang cocok dengan filter.':'Belum ada data stok.'}</td></tr>`;
 };
 
 // ===================== EDIT MASSAL MASTER =====================
@@ -2837,6 +2899,32 @@ window.copyStok = function(){
     document.body.appendChild(ta); ta.select();
     document.execCommand('copy'); document.body.removeChild(ta);
     showMsg('stokOk','✔ Berhasil dicopy!');
+  });
+};
+
+window.copyLaporanStok = function(){
+  const list = laporanStokRows();
+  if(!list.length){ alert('Tidak ada data laporan stok untuk dicopy.'); return; }
+  const fmtN = v => String(Math.round((parseFloat(v)||0)*100)/100).replace('.',',');
+  const header = ['Nama','Kategori','Sat','Isi/Drum','Harga','Stok Awal','Masuk','Keluar','Teoritis','Teoritis (drum)','Nilai','Status'].join('\t');
+  const rows = list.map(it => {
+    const teo = teoritisOf(it), isi = parseFloat(it.isiDrum)||0, harga = hargaOf(it);
+    const status = teo < -0.01 ? 'MINUS' : Math.abs(teo) <= 0.01 ? 'NOL' : 'ADA';
+    return [
+      it.nama, it.kat||'', it.sat||'kg', isi||'', harga||'',
+      fmtN(it.stokAwal||0), fmtN(sumMut(it,'masuk')), fmtN(sumMut(it,'keluar')),
+      fmtN(teo), isi>0?drumStr(teo,isi):'', harga?Math.round(nilaiOf(it)):'',
+      status
+    ].join('\t');
+  });
+  const tsv = header + '\n' + rows.join('\n');
+  navigator.clipboard.writeText(tsv).then(()=>showMsg('lapStokOk','✔ Laporan stok berhasil dicopy.'))
+  .catch(()=>{
+    const ta = document.createElement('textarea');
+    ta.value = tsv; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    showMsg('lapStokOk','✔ Laporan stok berhasil dicopy.');
   });
 };
 
