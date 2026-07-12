@@ -752,20 +752,21 @@ window.renderLaporanStok = function(){
         <td class="r ${net<0?'neg':net>0?'pos':'zero'}">${net?num(net):'0'}</td>
       </tr>`;
     }).join('') : `<tr><td colspan="4" class="empty">Tidak ada gerak stok di rentang ini.</td></tr>`;
-    return `<div style="border:1px solid #eee;border-radius:10px;margin-bottom:10px;overflow:hidden;background:#fff">
-      <div style="display:flex;gap:10px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;padding:10px 12px;background:#fafafa;border-bottom:1px solid #eee">
+    return `<details style="border:1px solid #eee;border-radius:10px;margin-bottom:10px;overflow:hidden;background:#fff">
+      <summary style="list-style:none;cursor:pointer;display:flex;gap:10px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;padding:10px 12px;background:#fafafa;border-bottom:1px solid #eee">
         <div class="nama-cell">${esc(it.nama)}<span class="kat">${esc(it.kat||'')} · ${esc(it.sat||'kg')}</span></div>
         <div class="mut-sum" style="margin:0;padding:4px 8px">
           <span style="color:#1e7a45">Masuk: <b>${num(r.totalMasuk)}</b></span>
           <span style="color:#b7600a">Keluar: <b>${num(r.totalKeluar)}</b></span>
           <span>Net: <b class="${r.net<0?'neg':r.net>0?'pos':''}">${num(r.net)}</b></span>
+          <span>Detail: <b>${rowDates.length} tanggal</b></span>
         </div>
-      </div>
+      </summary>
       <div class="tbl-wrap"><table>
         <thead><tr><th>Tanggal</th><th class="r">Masuk</th><th class="r">Keluar</th><th class="r">Net</th></tr></thead>
         <tbody>${lines}</tbody>
       </table></div>
-    </div>`;
+    </details>`;
   }).join('') : `<div class="empty">${items.length?'Tidak ada mutasi stok yang cocok dengan filter.':'Belum ada data stok.'}</div>`;
 };
 
