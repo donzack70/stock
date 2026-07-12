@@ -2228,11 +2228,26 @@ window.delMixRow = function(i){
 window.mixRowChanged = function(i, field, value){
   if(!mixRows[i]) return;
   mixRows[i][field] = value;
-  if(field === 'nama'){
-    const it = findExact(value);
-    if(it) mixRows[i].sat = it.sat || mixRows[i].sat || 'kg';
-  }
+  renderMixSummary();
+};
+
+window.mixRowPicked = function(i){
+  if(!mixRows[i]) return;
+  const it = findExact(mixRows[i].nama);
+  if(it && !mixRows[i].sat) mixRows[i].sat = it.sat || 'kg';
   renderMix();
+};
+
+window.mixQtyChanged = function(i, value){
+  if(!mixRows[i]) return;
+  mixRows[i].qty = value;
+  renderMixSummary();
+};
+
+window.mixSatChanged = function(i, value){
+  if(!mixRows[i]) return;
+  mixRows[i].sat = value;
+  renderMixSummary();
 };
 
 window.renderMixSummary = function(){
@@ -2257,9 +2272,9 @@ window.renderMix = function(){
     const sat = r.sat || (it ? it.sat : '');
     const available = it ? `${num(teoritisOf(it))} ${esc(it.sat||'')}` : '-';
     return `<tr>
-      <td><input class="edit-inp ${it?'ok':'warn'}" list="itemList" value="${esc(r.nama)}" placeholder="Pilih bahan..." oninput="mixRowChanged(${i},'nama',this.value)"></td>
-      <td><input class="edit-inp r" inputmode="decimal" value="${esc(r.qty)}" placeholder="0" oninput="mixRowChanged(${i},'qty',this.value)"></td>
-      <td><input class="edit-inp" value="${esc(sat)}" placeholder="${esc(it ? (it.sat||'') : 'kg')}" oninput="mixRowChanged(${i},'sat',this.value)"></td>
+      <td><input class="edit-inp ${it?'ok':'warn'}" list="itemList" value="${esc(r.nama)}" placeholder="Pilih bahan..." oninput="mixRowChanged(${i},'nama',this.value)" onchange="mixRowPicked(${i})" onblur="mixRowPicked(${i})"></td>
+      <td><input class="edit-inp r" inputmode="decimal" value="${esc(r.qty)}" placeholder="0" oninput="mixQtyChanged(${i},this.value)"></td>
+      <td><input class="edit-inp" value="${esc(sat)}" placeholder="${esc(it ? (it.sat||'') : 'kg')}" oninput="mixSatChanged(${i},this.value)"></td>
       <td class="r">${available}</td>
       <td class="r"><button class="icon-btn danger" onclick="delMixRow(${i})">✕</button></td>
     </tr>`;
