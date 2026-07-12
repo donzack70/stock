@@ -225,36 +225,27 @@
       <span class="spacer"></span>
       <button class="btn btn-line btn-sm" onclick="copyLaporanStok()">📋 Copy laporan</button>
     </div>
-    <div class="hint" style="margin:0 0 10px">Laporan baca-saja untuk cek stok. Angka teoritis dihitung dari stok awal + masuk − keluar, jadi tidak mengubah data apa pun.</div>
+    <div class="hint" style="margin:0 0 10px">Laporan baca-saja untuk melihat gerak stok per tanggal. Satu baris = satu barang, kolom tanggal menampilkan total masuk dan keluar di tanggal itu.</div>
     <div class="filter-row">
       <input type="text" id="lapStokCari" placeholder="Cari nama barang..." oninput="renderLaporanStok()">
       <select id="lapStokKat" onchange="renderLaporanStok()"><option value="">Semua kategori</option></select>
-      <select id="lapStokStatus" onchange="renderLaporanStok()">
-        <option value="">Semua status stok</option>
-        <option value="ada">Stok ada (&gt; 0)</option>
-        <option value="nol">Stok nol</option>
-        <option value="minus">Stok minus</option>
+      <input type="date" id="lapStokDari" onchange="renderLaporanStok()" title="Dari tanggal">
+      <span style="color:#aaa;font-size:12px">s/d</span>
+      <input type="date" id="lapStokSampai" onchange="renderLaporanStok()" title="Sampai tanggal">
+      <select id="lapStokIsi" onchange="renderLaporanStok()">
+        <option value="mutasi">Hanya barang yang bergerak</option>
+        <option value="semua">Semua barang</option>
       </select>
       <select id="lapStokSort" onchange="renderLaporanStok()">
         <option value="nama">Urut nama</option>
-        <option value="nilai_desc">Nilai terbesar</option>
-        <option value="stok_asc">Stok terkecil</option>
         <option value="keluar_desc">Keluar terbanyak</option>
+        <option value="masuk_desc">Masuk terbanyak</option>
+        <option value="net_asc">Net terkecil</option>
       </select>
     </div>
     <div class="mut-sum" id="lapStokSum"></div>
     <div class="tbl-wrap"><table>
-      <thead><tr>
-        <th>Barang</th>
-        <th>Kategori</th>
-        <th class="r">Awal</th>
-        <th class="r">Masuk</th>
-        <th class="r">Keluar</th>
-        <th class="r">Teoritis</th>
-        <th class="r">Harga</th>
-        <th class="r">Nilai</th>
-        <th>Status</th>
-      </tr></thead>
+      <thead id="lapStokHead"></thead>
       <tbody id="lapStokBody"></tbody>
     </table></div>
     <div class="ok-msg" id="lapStokOk"></div>
