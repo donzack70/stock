@@ -2305,9 +2305,46 @@ function renderMixHistory(){
       <td>${h ? esc(h.itemNama) : '<span style="color:#aaa">hasil tidak ditemukan</span>'}</td>
       <td style="font-size:11.5px;color:#666">${bahan || '-'}</td>
       <td class="r">${h ? `${num(h.qty)} ${esc(h.sat||'')}` : '-'}</td>
+      <td class="r"><button class="icon-btn danger" onclick="undoMix('${g.mixId}')" title="Batalkan campuran ini">Batalkan</button></td>
     </tr>`;
-  }).join('') : '<tr><td colspan="4" class="empty">Belum ada campuran produk.</td></tr>';
+  }).join('') : '<tr><td colspan="5" class="empty">Belum ada campuran produk.</td></tr>';
 }
+
+window.undoMix = async function(mixId){
+  const related = allMutasi().filter(m => m.mixId === mixId);
+  if(!related.length){
+    showMsg('mixErr','Campuran ini tidak ditemukan atau sudah dibatalkan.', 6000);
+    return;
+  }
+  const hasil = related.find(m=>m.mixRole==='hasil');
+  const bahan = related.filter(m=>m.mixRole==='bahan');
+  const bahanTxt = bahan.map(m=>`• ${m.itemNama}: ${num(m.qty)} ${m.sat||''}`).join('\n') || '• Tidak ada bahan ditemukan';
+  const hasilTxt = hasil ? `• ${hasil.itemNama}: ${num(hasil.qty)} ${hasil.sat||''}` : '• Hasil tidak ditemukan';
+  if(!confirm(`Batalkan campuran ini?\n\nMutasi berikut akan dihapus, sehingga stok kembali seperti sebelum campuran.\n\nHASIL MASUK DIHAPUS\n${hasilTxt}\n\nBAHAN KELUAR DIHAPUS\n${bahanTxt}`)) return;
+
+  if($('mixErr')) $('mixErr').style.display='none';
+  if($('mixOk')) $('mixOk').style.display='none';
+  try {
+    const touched = items.filter(it => (it.mutasi||[]).some(m => m.mixId === mixId));
+    const batch = writeBatch(db);
+    touched.forEach(it => {
+      batch.update(doc(db, COLL, it.id), {
+        mutasi: (it.mutasi||[]).filter(m => m.mixId !== mixId)
+      });
+    });
+    await batch.commit();
+    await auditLog('campur_produk_batal', {
+      mixId,
+      jumlahBarang:touched.length,
+      hasil: hasil ? { itemId:hasil.itemId, nama:hasil.itemNama, qty:hasil.qty, sat:hasil.sat } : null,
+      bahan: bahan.map(m=>({ itemId:m.itemId, nama:m.itemNama, qty:m.qty, sat:m.sat }))
+    });
+    showMsg('mixOk', `✔ Campuran dibatalkan. ${related.length} mutasi dihapus dan stok kembali.`, 7000);
+    renderMix();
+  } catch(e){
+    showMsg('mixErr','Gagal membatalkan campuran: '+e.message, 9000);
+  }
+};
 
 // ===================== SEMUA MUTASI (BULK EDIT) =====================
 function allMutasi(){
