@@ -42,7 +42,7 @@
 <div class="tabbar">
   <button class="tab-btn act" id="tb_dash" onclick="setTab('dash')">📊 Dashboard</button>
   <button class="tab-btn" id="tb_stok" onclick="setTab('stok')">📦 Stok</button>
-  <button class="tab-btn" id="tb_lapstok" onclick="setTab('lapstok')">📄 Laporan Stok</button>
+  <button class="tab-btn" id="tb_lapstok" onclick="setTab('lapstok')">📄 Barang Terjual</button>
   <button class="tab-btn" id="tb_jual" onclick="setTab('jual')">💵 Penjualan</button>
   <button class="tab-btn" id="tb_lapjual" onclick="setTab('lapjual')">📈 Laporan Jual</button>
   <button class="tab-btn" id="tb_imp" onclick="setTab('imp')">📋 Import Mutasi</button>
@@ -221,26 +221,24 @@
 <!-- ====== LAPORAN STOK ====== -->
 <div id="tab_lapstok" style="display:none">
   <div class="card">
-    <div class="card-title">📄 Laporan Stok
+    <div class="card-title">📄 Laporan Barang Terjual
       <span class="spacer"></span>
       <button class="btn btn-line btn-sm" onclick="copyLaporanStok()">📋 Copy laporan</button>
     </div>
-    <div class="hint" style="margin:0 0 10px">Laporan baca-saja untuk melihat gerak stok ringkas per barang. Detail tanggal dibuat dropdown agar layar tetap rapi; saat copy ke Sheet, semua detail tetap ikut tercopy.</div>
+    <div class="hint" style="margin:0 0 10px">Laporan baca-saja dari data penjualan. Pilih harian atau rentang tanggal untuk melihat barang apa saja yang terjual, total qty, dan nilai jualnya.</div>
     <div class="filter-row">
       <input type="text" id="lapStokCari" placeholder="Cari nama barang..." oninput="renderLaporanStok()">
       <select id="lapStokKat" onchange="renderLaporanStok()"><option value="">Semua kategori</option></select>
       <input type="date" id="lapStokDari" onchange="renderLaporanStok()" title="Dari tanggal">
       <span style="color:#aaa;font-size:12px">s/d</span>
       <input type="date" id="lapStokSampai" onchange="renderLaporanStok()" title="Sampai tanggal">
-      <select id="lapStokIsi" onchange="renderLaporanStok()">
-        <option value="mutasi">Hanya barang yang bergerak</option>
-        <option value="semua">Semua barang</option>
-      </select>
+      <button class="flt-btn" onclick="lapStokToday()">Hari ini</button>
+      <button class="flt-btn" onclick="lapStokResetDate()">Semua tanggal</button>
       <select id="lapStokSort" onchange="renderLaporanStok()">
         <option value="nama">Urut nama</option>
-        <option value="keluar_desc">Keluar terbanyak</option>
-        <option value="masuk_desc">Masuk terbanyak</option>
-        <option value="net_asc">Net terkecil</option>
+        <option value="qty_desc">Qty terbesar</option>
+        <option value="total_desc">Nilai terbesar</option>
+        <option value="row_desc">Baris terbanyak</option>
       </select>
     </div>
     <div class="mut-sum" id="lapStokSum"></div>

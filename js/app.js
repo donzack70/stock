@@ -262,7 +262,6 @@ function prepareFreshSessionView(){
     'mutCari','mutJenis','mutDari','mutSampai','jualTsv','impTsv','hImpTsv','mImpTsv',
     'mixNota','mixHasil','mixQty'
   ].forEach(id=>setValIfExists(id,''));
-  setValIfExists('lapStokIsi','mutasi');
   setValIfExists('lapStokSort','nama');
   setValIfExists('mutPageSize','50');
   setValIfExists('mixTanggal', todayIso());
@@ -310,6 +309,7 @@ function startListening(){
   unsubSales = onSnapshot(sq, snap => {
     sales = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if(curTab==='dash') renderDash();
+    if(curTab==='lapstok') renderLaporanStok();
     if(curTab==='lapjual'){ renderLaporanJual(); renderRekonsiliasi(); }
     renderRekonBadge();
   }, err => {
@@ -694,80 +694,114 @@ function laporanStokRows(){
   const kat = $('lapStokKat') ? $('lapStokKat').value : '';
   const dari = $('lapStokDari') ? $('lapStokDari').value : '';
   const sampai = $('lapStokSampai') ? $('lapStokSampai').value : '';
-  const isi = $('lapStokIsi') ? $('lapStokIsi').value : 'mutasi';
   const sort = $('lapStokSort') ? $('lapStokSort').value : 'nama';
-  let list = [...items];
-  if(cari) list = list.filter(it => String(it.nama||'').toLowerCase().includes(cari));
-  if(kat) list = list.filter(it => it.kat === kat);
+  const byItem = {};
   const dateSet = new Set();
-  const rows = list.map(it => {
-    const byDate = {};
-    (it.mutasi||[]).forEach(m => {
-      const t = String(m.tanggal||'');
-      if(dari && t < dari) return;
-      if(sampai && t > sampai) return;
-      if(!validIsoDate(t)) return;
-      if(!byDate[t]) byDate[t] = { masuk:0, keluar:0 };
-      if(m.jenis === 'masuk') byDate[t].masuk += parseFloat(m.qty)||0;
-      if(m.jenis === 'keluar') byDate[t].keluar += parseFloat(m.qty)||0;
-      dateSet.add(t);
-    });
-    const totalMasuk = Object.values(byDate).reduce((s,x)=>s+x.masuk,0);
-    const totalKeluar = Object.values(byDate).reduce((s,x)=>s+x.keluar,0);
-    return { it, byDate, totalMasuk, totalKeluar, net: totalMasuk - totalKeluar };
+  sales.forEach(s => {
+    const t = String(s.tanggal||'');
+    if(!validIsoDate(t)) return;
+    if(dari && t < dari) return;
+    if(sampai && t > sampai) return;
+    const item = s.itemId ? items.find(it=>it.id===s.itemId) : null;
+    const nama = s.namaBarang || s.namaNota || (item ? item.nama : '');
+    if(cari && !String(nama||'').toLowerCase().includes(cari)) return;
+    if(kat && (!item || item.kat !== kat)) return;
+    const key = s.itemId || normalizeName(nama);
+    if(!byItem[key]){
+      byItem[key] = {
+        item,
+        nama,
+        kat: item ? (item.kat||'') : '',
+        sat: s.sat || (item ? item.sat : '') || 'kg',
+        byDate:{},
+        totalQty:0,
+        totalNilai:0,
+        rows:0,
+        stockDeductedRows:0
+      };
+    }
+    if(!byItem[key].byDate[t]) byItem[key].byDate[t] = { qty:0, total:0, rows:0 };
+    const qty = parseFloat(s.qty)||0;
+    const total = parseFloat(s.subtotal)||0;
+    byItem[key].byDate[t].qty += qty;
+    byItem[key].byDate[t].total += total;
+    byItem[key].byDate[t].rows += 1;
+    byItem[key].totalQty += qty;
+    byItem[key].totalNilai += total;
+    byItem[key].rows += 1;
+    if(s.stockDeducted) byItem[key].stockDeductedRows += 1;
+    dateSet.add(t);
   });
-  const filtered = isi === 'semua' ? rows : rows.filter(r => Math.abs(r.totalMasuk) > 0.000001 || Math.abs(r.totalKeluar) > 0.000001);
-  filtered.sort((a,b)=>{
-    if(sort === 'keluar_desc') return b.totalKeluar - a.totalKeluar || String(a.it.nama||'').localeCompare(String(b.it.nama||''));
-    if(sort === 'masuk_desc') return b.totalMasuk - a.totalMasuk || String(a.it.nama||'').localeCompare(String(b.it.nama||''));
-    if(sort === 'net_asc') return a.net - b.net || String(a.it.nama||'').localeCompare(String(b.it.nama||''));
-    return String(a.it.nama||'').localeCompare(String(b.it.nama||''));
+  const rows = Object.values(byItem);
+  rows.sort((a,b)=>{
+    if(sort === 'qty_desc') return b.totalQty - a.totalQty || String(a.nama||'').localeCompare(String(b.nama||''));
+    if(sort === 'total_desc') return b.totalNilai - a.totalNilai || String(a.nama||'').localeCompare(String(b.nama||''));
+    if(sort === 'row_desc') return b.rows - a.rows || String(a.nama||'').localeCompare(String(b.nama||''));
+    return String(a.nama||'').localeCompare(String(b.nama||''));
   });
-  return { rows: filtered, dates: [...dateSet].sort(), dari, sampai };
+  return { rows, dates: [...dateSet].sort(), dari, sampai };
 }
 
 window.renderLaporanStok = function(){
   if(!$('lapStokBody')) return;
   const report = laporanStokRows();
   const { rows, dates, dari, sampai } = report;
-  const totalMasuk = rows.reduce((s,r)=>s+r.totalMasuk,0);
-  const totalKeluar = rows.reduce((s,r)=>s+r.totalKeluar,0);
+  const totalQty = rows.reduce((s,r)=>s+r.totalQty,0);
+  const totalNilai = rows.reduce((s,r)=>s+r.totalNilai,0);
+  const totalBaris = rows.reduce((s,r)=>s+r.rows,0);
+  const belumKurangStok = rows.reduce((s,r)=>s+(r.rows-r.stockDeductedRows),0);
   const rentang = (dari||sampai) ? `${dari?isoToDisp(dari):'awal'} — ${sampai?isoToDisp(sampai):'terakhir'}` : 'semua tanggal';
   $('lapStokSum').innerHTML = `<span>Rentang: <b>${rentang}</b></span>
-    <span>Barang tampil: <b>${rows.length}</b></span>
-    <span>Tanggal bergerak: <b>${dates.length}</b></span>
-    <span style="color:#1e7a45">Total masuk: <b>${num(totalMasuk)}</b></span>
-    <span style="color:#b7600a">Total keluar: <b>${num(totalKeluar)}</b></span>
-    <span>Net: <b>${num(totalMasuk-totalKeluar)}</b></span>`;
+    <span>Barang terjual: <b>${rows.length}</b></span>
+    <span>Baris penjualan: <b>${totalBaris}</b></span>
+    <span>Total qty: <b>${num(totalQty)}</b></span>
+    <span>Total jual: <b>${rp(totalNilai)}</b></span>
+    ${belumKurangStok?`<span style="color:#b7600a">Belum kurangi stok: <b>${belumKurangStok}</b></span>`:''}`;
   $('lapStokBody').innerHTML = rows.length ? rows.map(r=>{
-    const it = r.it;
     const rowDates = Object.keys(r.byDate).sort();
-    const lines = rowDates.length ? rowDates.map(d=>{
+    const lines = rowDates.map(d=>{
       const v = r.byDate[d];
-      const net = (v.masuk||0) - (v.keluar||0);
       return `<tr>
         <td style="width:92px">${isoToDisp(d)}</td>
-        <td class="r" style="color:#1e7a45">${v.masuk?num(v.masuk):'-'}</td>
-        <td class="r" style="color:#b7600a">${v.keluar?num(v.keluar):'-'}</td>
-        <td class="r ${net<0?'neg':net>0?'pos':'zero'}">${net?num(net):'0'}</td>
+        <td class="r" style="font-weight:700">${num(v.qty)}</td>
+        <td class="r">${rp(v.total)}</td>
+        <td class="r">${v.rows}</td>
       </tr>`;
-    }).join('') : `<tr><td colspan="4" class="empty">Tidak ada gerak stok di rentang ini.</td></tr>`;
+    }).join('');
+    const stockNote = r.rows === r.stockDeductedRows
+      ? '<span class="tag tag-keluar">stok sudah turun</span>'
+      : r.stockDeductedRows === 0
+        ? '<span class="tag">stok belum turun</span>'
+        : `<span class="tag tag-dup">${r.rows-r.stockDeductedRows} belum turun</span>`;
     return `<details style="border:1px solid #eee;border-radius:10px;margin-bottom:10px;overflow:hidden;background:#fff">
       <summary style="list-style:none;cursor:pointer;display:flex;gap:10px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;padding:10px 12px;background:#fafafa;border-bottom:1px solid #eee">
-        <div class="nama-cell">${esc(it.nama)}<span class="kat">${esc(it.kat||'')} · ${esc(it.sat||'kg')}</span></div>
+        <div class="nama-cell">${esc(r.nama)}<span class="kat">${esc(r.kat||'')} · ${esc(r.sat||'kg')} · ${stockNote}</span></div>
         <div class="mut-sum" style="margin:0;padding:4px 8px">
-          <span style="color:#1e7a45">Masuk: <b>${num(r.totalMasuk)}</b></span>
-          <span style="color:#b7600a">Keluar: <b>${num(r.totalKeluar)}</b></span>
-          <span>Net: <b class="${r.net<0?'neg':r.net>0?'pos':''}">${num(r.net)}</b></span>
+          <span>Qty: <b>${num(r.totalQty)}</b></span>
+          <span>Nilai: <b>${rp(r.totalNilai)}</b></span>
+          <span>Baris: <b>${r.rows}</b></span>
           <span>Detail: <b>${rowDates.length} tanggal</b></span>
         </div>
       </summary>
       <div class="tbl-wrap"><table>
-        <thead><tr><th>Tanggal</th><th class="r">Masuk</th><th class="r">Keluar</th><th class="r">Net</th></tr></thead>
+        <thead><tr><th>Tanggal</th><th class="r">Qty terjual</th><th class="r">Nilai jual</th><th class="r">Baris</th></tr></thead>
         <tbody>${lines}</tbody>
       </table></div>
     </details>`;
-  }).join('') : `<div class="empty">${items.length?'Tidak ada mutasi stok yang cocok dengan filter.':'Belum ada data stok.'}</div>`;
+  }).join('') : `<div class="empty">${sales.length?'Tidak ada penjualan yang cocok dengan filter.':'Belum ada data penjualan.'}</div>`;
+};
+
+window.lapStokToday = function(){
+  const t = todayIso();
+  $('lapStokDari').value = t;
+  $('lapStokSampai').value = t;
+  renderLaporanStok();
+};
+
+window.lapStokResetDate = function(){
+  $('lapStokDari').value = '';
+  $('lapStokSampai').value = '';
+  renderLaporanStok();
 };
 
 // ===================== EDIT MASSAL MASTER =====================
@@ -2928,31 +2962,29 @@ window.copyStok = function(){
 window.copyLaporanStok = function(){
   const report = laporanStokRows();
   const { rows } = report;
-  if(!rows.length){ alert('Tidak ada data laporan stok untuk dicopy.'); return; }
+  if(!rows.length){ alert('Tidak ada data barang terjual untuk dicopy.'); return; }
   const fmtN = v => String(Math.round((parseFloat(v)||0)*100)/100).replace('.',',');
-  const header = ['Nama','Kategori','Sat','Tanggal','Masuk','Keluar','Net','Total Masuk Barang','Total Keluar Barang','Net Barang'].join('\t');
+  const header = ['Nama','Kategori','Sat','Tanggal','Qty Terjual','Nilai Jual','Baris Penjualan','Total Qty Barang','Total Nilai Barang','Total Baris Barang','Stok Dikurangi'].join('\t');
   const outRows = [];
   rows.forEach(r => {
-    const it = r.it;
     const rowDates = Object.keys(r.byDate).sort();
     if(!rowDates.length){
-      outRows.push([it.nama, it.kat||'', it.sat||'kg', '', '', '', '', fmtN(r.totalMasuk), fmtN(r.totalKeluar), fmtN(r.net)].join('\t'));
+      outRows.push([r.nama, r.kat||'', r.sat||'kg', '', '', '', '', fmtN(r.totalQty), Math.round(r.totalNilai), r.rows, r.rows===r.stockDeductedRows?'YA':'BELUM SEMUA'].join('\t'));
       return;
     }
     rowDates.forEach(d => {
-      const v = r.byDate[d] || { masuk:0, keluar:0 };
-      const net = (v.masuk||0) - (v.keluar||0);
-      outRows.push([it.nama, it.kat||'', it.sat||'kg', isoToDisp(d), v.masuk?fmtN(v.masuk):'', v.keluar?fmtN(v.keluar):'', fmtN(net), fmtN(r.totalMasuk), fmtN(r.totalKeluar), fmtN(r.net)].join('\t'));
+      const v = r.byDate[d] || { qty:0, total:0, rows:0 };
+      outRows.push([r.nama, r.kat||'', r.sat||'kg', isoToDisp(d), fmtN(v.qty), Math.round(v.total), v.rows, fmtN(r.totalQty), Math.round(r.totalNilai), r.rows, r.rows===r.stockDeductedRows?'YA':'BELUM SEMUA'].join('\t'));
     });
   });
   const tsv = header + '\n' + outRows.join('\n');
-  navigator.clipboard.writeText(tsv).then(()=>showMsg('lapStokOk','✔ Laporan stok berhasil dicopy.'))
+  navigator.clipboard.writeText(tsv).then(()=>showMsg('lapStokOk','✔ Laporan barang terjual berhasil dicopy.'))
   .catch(()=>{
     const ta = document.createElement('textarea');
     ta.value = tsv; ta.style.position='fixed'; ta.style.opacity='0';
     document.body.appendChild(ta); ta.select();
     document.execCommand('copy'); document.body.removeChild(ta);
-    showMsg('lapStokOk','✔ Laporan stok berhasil dicopy.');
+    showMsg('lapStokOk','✔ Laporan barang terjual berhasil dicopy.');
   });
 };
 
