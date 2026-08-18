@@ -42,7 +42,7 @@
 <div class="tabbar">
   <button class="tab-btn act" id="tb_dash" onclick="setTab('dash')">📊 Dashboard</button>
   <button class="tab-btn" id="tb_stok" onclick="setTab('stok')">📦 Stok</button>
-  <button class="tab-btn" id="tb_lapstok" onclick="setTab('lapstok')">📄 Barang Terjual</button>
+  <button class="tab-btn" id="tb_lapstok" onclick="setTab('lapstok')">📄 Barang Keluar</button>
   <button class="tab-btn" id="tb_jual" onclick="setTab('jual')">💵 Penjualan</button>
   <button class="tab-btn" id="tb_lapjual" onclick="setTab('lapjual')">📈 Laporan Jual</button>
   <button class="tab-btn" id="tb_imp" onclick="setTab('imp')">📋 Import Mutasi</button>
@@ -221,11 +221,11 @@
 <!-- ====== LAPORAN STOK ====== -->
 <div id="tab_lapstok" style="display:none">
   <div class="card">
-    <div class="card-title">📄 Laporan Barang Terjual
+    <div class="card-title">📄 Laporan Barang Keluar
       <span class="spacer"></span>
       <button class="btn btn-line btn-sm" onclick="copyLaporanStok()">📋 Copy laporan</button>
     </div>
-    <div class="hint" style="margin:0 0 10px">Laporan baca-saja dari data penjualan. Pilih harian atau rentang tanggal untuk melihat barang apa saja yang terjual, total qty, dan nilai jualnya.</div>
+    <div class="hint" style="margin:0 0 10px">Laporan baca-saja dari mutasi stok keluar. Pilih harian atau rentang tanggal untuk melihat barang apa saja yang keluar dan total qty-nya. Bahan campuran dan mutasi yang ditandai bukan penjualan tidak dihitung.</div>
     <div class="filter-row">
       <input type="text" id="lapStokCari" placeholder="Cari nama barang..." oninput="renderLaporanStok()">
       <select id="lapStokKat" onchange="renderLaporanStok()"><option value="">Semua kategori</option></select>
@@ -237,7 +237,6 @@
       <select id="lapStokSort" onchange="renderLaporanStok()">
         <option value="nama">Urut nama</option>
         <option value="qty_desc">Qty terbesar</option>
-        <option value="total_desc">Nilai terbesar</option>
         <option value="row_desc">Baris terbanyak</option>
       </select>
     </div>
