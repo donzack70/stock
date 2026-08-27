@@ -2477,6 +2477,7 @@ function validateMix(){
   const tanggal = $('mixTanggal').value || todayIso();
   const noNota = $('mixNota').value.trim();
   const errors = [];
+  const warnings = [];
   if(!validIsoDate(tanggal)) errors.push('Tanggal belum benar.');
 
   const hasilRows = mixOutRows.map((r,i)=>({ ...mixOutRowNormalized(r), idx:i, raw:r })).filter(r=>r.raw.nama || r.raw.qty);
