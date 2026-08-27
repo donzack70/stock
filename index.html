@@ -351,9 +351,25 @@
     <div class="e-grid">
       <div class="field"><label>Tanggal</label><input type="date" id="mixTanggal"></div>
       <div class="field"><label>No. produksi / catatan</label><input type="text" id="mixNota" placeholder="Opsional, contoh: MIX-001"></div>
-      <div class="field"><label>Barang hasil</label><input type="text" id="mixHasil" list="itemList" placeholder="Pilih barang hasil..." oninput="renderMixSummary()"></div>
-      <div class="field"><label>Jumlah hasil</label><input type="text" inputmode="decimal" id="mixQty" placeholder="Contoh: 10" oninput="renderMixSummary()"></div>
     </div>
+    <div class="hint">Satu proses campur boleh punya banyak hasil. Contoh: bahan A+B keluar, lalu barang C dan D sama-sama masuk.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Barang hasil
+      <span class="spacer"></span>
+      <button class="btn btn-line btn-sm" onclick="addMixOutRow()">➕ Tambah hasil</button>
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>Barang hasil</th>
+        <th class="r" style="width:130px">Qty</th>
+        <th style="width:80px">Satuan</th>
+        <th class="r" style="width:110px">Stok sekarang</th>
+        <th style="width:48px"></th>
+      </tr></thead>
+      <tbody id="mixOutBody"></tbody>
+    </table></div>
     <div class="hint" id="mixHasilHint"></div>
   </div>
 
