@@ -2511,11 +2511,12 @@ function validateMix(){
   bahan.forEach(r => {
     const tersedia = teoritisOf(r.it) + oldMixBahanQty(r.it.id);
     if(r.qty - tersedia > 0.000001){
-      errors.push(`Stok bahan "${r.it.nama}" tidak cukup. Tersedia ${num(tersedia)} ${r.it.sat||''}, diminta ${num(r.qty)} ${r.sat||''}.`);
+      const sisa = tersedia - r.qty;
+      warnings.push(`Stok "${r.it.nama}" akan menjadi ${num(sisa)} ${r.it.sat||''}.`);
     }
   });
 
-  return { tanggal, noNota, hasil, bahan, errors };
+  return { tanggal, noNota, hasil, bahan, errors, warnings };
 }
 
 window.saveMix = async function(){
@@ -2528,8 +2529,9 @@ window.saveMix = async function(){
   }
   const hasilTxt = v.hasil.map(r=>`• ${r.it.nama}: ${num(r.qty)} ${r.sat||''}`).join('\n');
   const bahanTxt = v.bahan.map(r=>`• ${r.it.nama}: ${num(r.qty)} ${r.sat||''}`).join('\n');
+  const warningTxt = v.warnings.length ? `\n\nPERINGATAN STOK MINUS\n${v.warnings.map(w=>`• ${w}`).join('\n')}` : '';
   const modeTxt = editMixId ? 'Simpan perubahan campuran ini?' : 'Simpan campuran ini?';
-  if(!confirm(`${modeTxt}\n\nHASIL MASUK\n${hasilTxt}\n\nBAHAN KELUAR\n${bahanTxt}`)) return;
+  if(!confirm(`${modeTxt}\n\nHASIL MASUK\n${hasilTxt}\n\nBAHAN KELUAR\n${bahanTxt}${warningTxt}`)) return;
 
   const btn = $('mixSaveBtn');
   btn.disabled = true;
