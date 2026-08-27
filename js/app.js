@@ -168,6 +168,7 @@ let importRows = [];
 let jualRows = [];
 let mixRows = [];
 let mixOutRows = [];
+let editMixId = null;
 let lastSaleImport = null;
 let importJenis = 'keluar';         // pilihan manual masuk/keluar
 let fisikDraft = {};
@@ -257,6 +258,7 @@ function prepareFreshSessionView(){
   histMutEdit = null;
   saleEditId = null;
   saleCreateMutation = null;
+  editMixId = null;
   importJenis = 'keluar';
 
   [
@@ -2319,7 +2321,24 @@ function mixOutRowNormalized(r){
   return normalizeMixEntry(r);
 }
 
+function oldMixBahanQty(itemId){
+  if(!editMixId) return 0;
+  const it = items.find(x => x.id === itemId);
+  if(!it) return 0;
+  return (it.mutasi||[])
+    .filter(m => m.mixId === editMixId && m.mixRole === 'bahan')
+    .reduce((s,m)=>s+(parseFloat(m.qty)||0),0);
+}
+
+function resetMixSaveButton(){
+  const btn = $('mixSaveBtn');
+  if(!btn) return;
+  btn.disabled = false;
+  btn.textContent = editMixId ? '💾 Simpan perubahan' : '💾 Simpan campuran';
+}
+
 window.resetMixForm = function(clearMsg=true){
+  editMixId = null;
   if($('mixTanggal')) $('mixTanggal').value = todayIso();
   if($('mixNota')) $('mixNota').value = '';
   mixOutRows = [blankMixOutRow()];
@@ -2328,6 +2347,7 @@ window.resetMixForm = function(clearMsg=true){
     if($('mixErr')) $('mixErr').style.display = 'none';
     if($('mixOk')) $('mixOk').style.display = 'none';
   }
+  resetMixSaveButton();
   renderMix();
 };
 
@@ -2412,7 +2432,8 @@ window.renderMixSummary = function(){
   $('mixSummary').innerHTML = `<span>Hasil valid: <b>${hasil.length}</b></span>
     <span>Total qty hasil: <b>${num(totalHasil)}</b></span>
     <span>Bahan valid: <b>${bahan.length}</b></span>
-    <span>Total qty bahan: <b>${num(totalBahan)}</b></span>`;
+    <span>Total qty bahan: <b>${num(totalBahan)}</b></span>
+    ${editMixId ? `<span style="color:#b7600a">Mode edit: <b>${esc(editMixId)}</b></span>` : ''}`;
   const hint = $('mixHasilHint');
   if(hint) hint.innerHTML = hasil.length
     ? `Hasil valid: <b>${hasil.length}</b>. Semua hasil akan bertambah dalam satu transaksi campuran.`
@@ -2439,7 +2460,7 @@ window.renderMix = function(){
   $('mixBody').innerHTML = mixRows.map((r,i)=>{
     const it = findExact(r.nama);
     const sat = r.sat || (it ? it.sat : '');
-    const available = it ? `${num(teoritisOf(it))} ${esc(it.sat||'')}` : '-';
+    const available = it ? `${num(teoritisOf(it) + oldMixBahanQty(it.id))} ${esc(it.sat||'')}` : '-';
     return `<tr>
       <td><input class="edit-inp ${it?'ok':'warn'}" list="itemList" value="${esc(r.nama)}" placeholder="Pilih bahan..." oninput="mixRowChanged(${i},'nama',this.value)" onchange="mixRowPicked(${i})" onblur="mixRowPicked(${i})"></td>
       <td><input class="edit-inp r" inputmode="decimal" value="${esc(r.qty)}" placeholder="0" oninput="mixQtyChanged(${i},this.value)"></td>
@@ -2488,7 +2509,7 @@ function validateMix(){
   });
 
   bahan.forEach(r => {
-    const tersedia = teoritisOf(r.it);
+    const tersedia = teoritisOf(r.it) + oldMixBahanQty(r.it.id);
     if(r.qty - tersedia > 0.000001){
       errors.push(`Stok bahan "${r.it.nama}" tidak cukup. Tersedia ${num(tersedia)} ${r.it.sat||''}, diminta ${num(r.qty)} ${r.sat||''}.`);
     }
@@ -2507,18 +2528,24 @@ window.saveMix = async function(){
   }
   const hasilTxt = v.hasil.map(r=>`• ${r.it.nama}: ${num(r.qty)} ${r.sat||''}`).join('\n');
   const bahanTxt = v.bahan.map(r=>`• ${r.it.nama}: ${num(r.qty)} ${r.sat||''}`).join('\n');
-  if(!confirm(`Simpan campuran ini?\n\nHASIL MASUK\n${hasilTxt}\n\nBAHAN KELUAR\n${bahanTxt}`)) return;
+  const modeTxt = editMixId ? 'Simpan perubahan campuran ini?' : 'Simpan campuran ini?';
+  if(!confirm(`${modeTxt}\n\nHASIL MASUK\n${hasilTxt}\n\nBAHAN KELUAR\n${bahanTxt}`)) return;
 
   const btn = $('mixSaveBtn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
   try {
-    const mixId = `mix-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const mixId = editMixId || `mix-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
     const noNota = v.noNota || `Campur ${isoToDisp(v.tanggal)}`;
     const batch = writeBatch(db);
     const bahanInfo = v.bahan.map(r=>({ itemId:r.it.id, nama:r.it.nama, qty:r.qty, sat:r.sat, sourceQty:r.sourceQty, sourceSat:r.sourceSat }));
     const hasilInfo = v.hasil.map(r=>({ itemId:r.it.id, nama:r.it.nama, qty:r.qty, sat:r.sat, sourceQty:r.sourceQty, sourceSat:r.sourceSat }));
     const hasilNama = hasilInfo.map(h=>h.nama).join(', ');
+    const newMutasiByItem = {};
+    const addNewMut = (itemId, mut) => {
+      if(!newMutasiByItem[itemId]) newMutasiByItem[itemId] = [];
+      newMutasiByItem[itemId].push(mut);
+    };
 
     v.bahan.forEach(r => {
       const mut = {
@@ -2535,7 +2562,7 @@ window.saveMix = async function(){
         mixTargetNama: hasilNama,
         mixHasil: hasilInfo
       };
-      batch.update(doc(db, COLL, r.it.id), { mutasi:[...(r.it.mutasi||[]), mut] });
+      addNewMut(r.it.id, mut);
     });
 
     v.hasil.forEach(r => {
@@ -2552,17 +2579,32 @@ window.saveMix = async function(){
         mixBahan:bahanInfo,
         mixHasil:hasilInfo
       };
-      batch.update(doc(db, COLL, r.it.id), { mutasi:[...(r.it.mutasi||[]), hasilMut] });
+      addNewMut(r.it.id, hasilMut);
     });
+
+    const touched = new Set(Object.keys(newMutasiByItem));
+    if(editMixId){
+      items.forEach(it => {
+        if((it.mutasi||[]).some(m => m.mixId === editMixId)) touched.add(it.id);
+      });
+    }
+    touched.forEach(itemId => {
+      const it = items.find(x => x.id === itemId);
+      if(!it) return;
+      const baseMutasi = (it.mutasi||[]).filter(m => m.mixId !== mixId);
+      batch.update(doc(db, COLL, itemId), { mutasi:[...baseMutasi, ...(newMutasiByItem[itemId]||[])] });
+    });
+
     await batch.commit();
-    await auditLog('campur_produk', { mixId, tanggal:v.tanggal, hasil:hasilInfo, bahan:bahanInfo, noNota });
-    showMsg('mixOk', `✔ Campuran disimpan. ${v.bahan.length} bahan dikurangi dan ${v.hasil.length} barang hasil ditambah.`, 7000);
+    await auditLog(editMixId ? 'campur_produk_edit' : 'campur_produk', { mixId, tanggal:v.tanggal, hasil:hasilInfo, bahan:bahanInfo, noNota });
+    showMsg('mixOk', editMixId
+      ? `✔ Campuran diperbarui. ${v.bahan.length} bahan dan ${v.hasil.length} barang hasil sudah diganti.`
+      : `✔ Campuran disimpan. ${v.bahan.length} bahan dikurangi dan ${v.hasil.length} barang hasil ditambah.`, 7000);
     resetMixForm(false);
   } catch(e){
     showMsg('mixErr','Gagal menyimpan campuran: '+e.message, 9000);
   } finally {
-    btn.disabled = false;
-    btn.textContent = '💾 Simpan campuran';
+    resetMixSaveButton();
   }
 };
 
@@ -2580,6 +2622,7 @@ function renderMixHistory(){
       <td style="font-size:11.5px;color:#666">${bahan || '-'}</td>
       <td class="r">${qtyHtml}</td>
       <td class="r">
+        <button class="icon-btn" onclick="editMix('${g.mixId}')" title="Edit campuran ini">Edit</button>
         <button class="icon-btn" onclick="openMixDetail('${g.mixId}')" title="Lihat detail campuran">Detail</button>
         <button class="icon-btn danger" onclick="undoMix('${g.mixId}')" title="Batalkan campuran ini">Batalkan</button>
       </td>
@@ -2598,6 +2641,32 @@ function mixGroups(){
   });
   return Object.values(grouped).sort((a,b)=>String(b.tanggal).localeCompare(String(a.tanggal)));
 }
+
+window.editMix = function(mixId){
+  const g = mixGroups().find(x=>x.mixId===mixId);
+  if(!g){
+    showMsg('mixErr','Campuran ini tidak ditemukan atau sudah dibatalkan.', 6000);
+    return;
+  }
+  const hasil = Array.isArray(g.hasil) ? g.hasil : (g.hasil ? [g.hasil] : []);
+  if(!hasil.length || !g.bahan.length){
+    showMsg('mixErr','Campuran ini tidak lengkap, jadi lebih aman dibatalkan lalu dibuat ulang.', 8000);
+    return;
+  }
+  editMixId = mixId;
+  if($('mixTanggal')) $('mixTanggal').value = g.tanggal || todayIso();
+  if($('mixNota')) $('mixNota').value = g.noNota || '';
+  mixOutRows = hasil.map(h => ({ nama:h.itemNama || '', qty:String(h.qty ?? ''), sat:h.sat || '' }));
+  mixRows = g.bahan.map(b => ({ nama:b.itemNama || '', qty:String(b.qty ?? ''), sat:b.sat || '' }));
+  if(!mixOutRows.length) mixOutRows = [blankMixOutRow()];
+  if(!mixRows.length) mixRows = [blankMixRow(), blankMixRow()];
+  if($('mixErr')) $('mixErr').style.display = 'none';
+  showMsg('mixOk', `Mode edit aktif untuk ${g.noNota || g.mixId}. Setelah disimpan, mutasi campuran lama akan diganti dengan yang baru.`, 9000);
+  resetMixSaveButton();
+  renderMix();
+  const tab = $('tab_campur');
+  if(tab && tab.scrollIntoView) tab.scrollIntoView({ behavior:'smooth', block:'start' });
+};
 
 window.openMixDetail = function(mixId){
   const g = mixGroups().find(x=>x.mixId===mixId);
