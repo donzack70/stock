@@ -2213,13 +2213,13 @@ function impRowHtml(r, i){
     ? `<span style="color:#c0392b;font-weight:700">Tanggal salah</span><br><span style="color:#aaa">${esc(r.rawTanggal||'-')}</span>`
     : isoToDisp(r.tanggal);
   return `<tr>
-    <td><input type="checkbox" id="impC_${i}" ${r.checked?'checked':''} onchange="importRows[${i}].checked=this.checked" style="width:15px;height:15px"></td>
+    <td><input type="checkbox" id="impC_${i}" ${r.checked?'checked':''} onchange="impRowChecked(${i},this.checked)" style="width:15px;height:15px"></td>
     <td>${dateHtml}</td>
     <td style="color:#888;font-size:11.5px">${esc(r.pihak)}${r.noNota?'<br><span style="color:#bbb;font-size:10.5px">'+esc(r.noNota)+'</span>':''}</td>
     <td style="font-size:11.5px;color:#666">${esc(r.namaRaw)}</td>
     <td><input class="${cls}" list="itemList" value="${esc(r.target)}" oninput="impOnTarget(${i},this)" placeholder="Pilih barang stok..."></td>
     <td>
-      <input class="r" style="width:74px;text-align:right" value="${String(r.qty).replace('.',',')}" oninput="importRows[${i}].qty=parseIdG(this.value)">
+      <input class="r" style="width:74px;text-align:right" value="${String(r.qty).replace('.',',')}" oninput="impQtyChanged(${i},this.value)">
       <span style="display:inline-block;min-width:24px">${esc(r.sat)}</span>
       ${r.unitConverted?`<span class="drum-note">${num(r.sourceQty)} ${esc(r.sourceSat)} → standar</span>`:''}
     </td>
@@ -2232,6 +2232,12 @@ function impRowHtml(r, i){
   </tr>`;
 }
 window.parseIdG = parseId;
+window.impRowChecked = function(i, checked){
+  if(importRows[i]) importRows[i].checked = !!checked;
+};
+window.impQtyChanged = function(i, value){
+  if(importRows[i]) importRows[i].qty = parseId(value);
+};
 window.impOnTarget = function(i, inp){
   importRows[i].target = inp.value;
   const exact = findExact(inp.value);
@@ -2241,12 +2247,26 @@ window.impOnTarget = function(i, inp){
 window.impToggleAll = function(v){ importRows.forEach((r,i)=>{ r.checked=v && !r.invalidDate && !r.dup; const c=$('impC_'+i); if(c) c.checked=r.checked; }); };
 
 window.doImport = async function(){
-  const rows = importRows.filter(r => r.checked && !r.invalidDate && r.target && findExact(r.target) && r.qty > 0);
-  if(!rows.length){ showMsg('impErr','Tidak ada baris valid yang dicentang.', 5000); return; }
+  const selected = importRows.filter(r => r.checked);
+  if(!selected.length){ showMsg('impErr','Tidak ada baris yang dicentang.', 5000); return; }
+
+  const blocked = [];
+  selected.forEach((r, i) => {
+    const rowNo = importRows.indexOf(r) + 1;
+    if(r.invalidDate) blocked.push(`Baris ${rowNo}: tanggal tidak terbaca.`);
+    if(!r.target || !findExact(r.target)) blocked.push(`Baris ${rowNo}: barang stok belum cocok dengan master.`);
+    if(!(parseFloat(r.qty) > 0)) blocked.push(`Baris ${rowNo}: qty harus lebih dari 0.`);
+  });
+  if(blocked.length){
+    showMsg('impErr', `Ada ${blocked.length} masalah di baris yang dicentang. ${blocked.slice(0,6).join(' ')}${blocked.length>6?' ...':''}`, 12000);
+    return;
+  }
+
+  const rows = selected.map(r => ({ ...r, item: findExact(r.target) }));
   if(importJenis==='keluar'){
     const qtyByItem = {};
     rows.forEach(r => {
-      const it = findExact(r.target);
+      const it = r.item;
       qtyByItem[it.id] = (qtyByItem[it.id]||0) + (parseFloat(r.qty)||0);
     });
     const minus = Object.entries(qtyByItem).map(([id,qty]) => {
@@ -2262,14 +2282,16 @@ window.doImport = async function(){
   try {
     const byItem = {};
     rows.forEach(r => {
-      const it = findExact(r.target);
+      const it = r.item;
       if(!byItem[it.id]) byItem[it.id] = { it, add: [] };
       byItem[it.id].add.push({ jenis:r.jenis, tanggal:r.tanggal, qty:r.qty, sat:r.sat, pihak:r.pihak, noNota:r.noNota, ref:r.ref });
     });
+    const batch = writeBatch(db);
     for(const id of Object.keys(byItem)){
       const { it, add } = byItem[id];
-      await updateDoc(doc(db, COLL, id), { mutasi: [...(it.mutasi||[]), ...add] });
+      batch.update(doc(db, COLL, id), { mutasi: [...(it.mutasi||[]), ...add] });
     }
+    await batch.commit();
     await auditLog('import_mutasi', { jenis: importJenis, jumlah: rows.length, barang: Object.keys(byItem).length });
     showMsg('impOk', `✔ ${rows.length} mutasi (${importJenis}) disimpan ke ${Object.keys(byItem).length} barang.`, 6000);
     $('impTsv').value='';
