@@ -165,6 +165,7 @@ let curTab = 'dash';
 let fltMinusOn = false, fisBelumOn = false;
 let editDocId = null, histDocId = null, histMutEdit = null, saleEditId = null, saleCreateMutation = null;
 let importRows = [];
+let importOnlyMissing = true;
 let jualRows = [];
 let mixRows = [];
 let mixOutRows = [];
@@ -2122,7 +2123,7 @@ function updateJenisSeg(){
 
 window.parseImport = function(){
   $('impErr').style.display='none';
-  $('impPreview').innerHTML=''; importRows=[];
+  $('impPreview').innerHTML=''; importRows=[]; importOnlyMissing=true;
   if(!items.length){ showMsg('impErr','Daftar stok masih kosong — import master barang dulu di tab 📦 Stok.', 7000); return; }
   const raw = $('impTsv').value.trim();
   if(!raw){ showMsg('impErr','Paste data TSV dulu.'); return; }
@@ -2140,8 +2141,15 @@ window.parseImport = function(){
   const iNota  = idxAny('no.nota','no nota','nonota','nota','invoice','faktur');
   const iSat   = idxAny('sat','satuan','unit');
 
-  const existingRefs = new Set();
-  items.forEach(it => (it.mutasi||[]).forEach(m => { if(m.ref) existingRefs.add(m.ref); }));
+  // Hitung jumlah kemunculan, bukan sekadar ada/tidak. Dengan begitu jika ada
+  // tiga transaksi identik tetapi baru satu yang tersimpan, dua sisanya tetap
+  // terdeteksi sebagai belum masuk.
+  const existingRefCounts = new Map();
+  items.forEach(it => (it.mutasi||[]).forEach(m => {
+    if(!m.ref) return;
+    const key = String(m.ref).toLowerCase();
+    existingRefCounts.set(key, (existingRefCounts.get(key)||0) + 1);
+  }));
 
   for(let i=1;i<lines.length;i++){
     const r = lines[i]; if(r.length < 2) continue;
@@ -2162,7 +2170,10 @@ window.parseImport = function(){
     const sat = normalized.sat;
     const ref = [jenis, tanggal, noNota, namaRaw, qty].join('|').toLowerCase();
     const legacyRef = [jenis, tanggal, noNota, namaRaw, sourceQty].join('|').toLowerCase();
-    const dup = existingRefs.has(ref) || existingRefs.has(legacyRef);
+    const refCandidates = [...new Set([ref, legacyRef])];
+    const matchedRef = refCandidates.find(key => (existingRefCounts.get(key)||0) > 0);
+    const dup = !!matchedRef;
+    if(matchedRef) existingRefCounts.set(matchedRef, existingRefCounts.get(matchedRef) - 1);
     importRows.push({
       jenis, tanggal, pihak, noNota, sat, qty, namaRaw, ref,
       sourceQty, sourceSat, unitConverted:normalized.converted,
@@ -2180,13 +2191,16 @@ window.parseImport = function(){
   const nNoMatch = importRows.filter(r=>!r.target).length;
   const nFuzzy = importRows.filter(r=>r.fuzzy).length;
   const nBadDate = importRows.filter(r=>r.invalidDate).length;
+  const nMissing = importRows.length - nDup;
   $('impPreview').innerHTML = `
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
       <span class="tag ${jenis==='masuk'?'tag-masuk':'tag-keluar'}" style="font-size:12px;padding:3px 12px">Disimpan sebagai: BARANG ${jenis.toUpperCase()} — ${importRows.length} baris</span>
-      ${nDup?`<span class="tag tag-dup">${nDup} kemungkinan duplikat (tidak dicentang)</span>`:''}
+      ${nDup?`<span class="tag tag-dup">${nDup} sudah masuk</span>`:''}
+      <span class="tag tag-masuk">${nMissing} belum masuk</span>
       ${nNoMatch?`<span class="tag tag-fuzzy">${nNoMatch} tidak ketemu — pilih manual atau hilangkan centang</span>`:''}
       ${nFuzzy?`<span class="tag tag-fuzzy">${nFuzzy} cocok mirip, wajib dicek manual</span>`:''}
       ${nBadDate?`<span class="tag tag-dup">${nBadDate} tanggal tidak terbaca</span>`:''}
+      ${nDup?`<label class="hint" style="margin:0"><input type="checkbox" checked onchange="impSetOnlyMissing(this.checked)" style="width:15px;height:15px;vertical-align:middle"> Tampilkan hanya yang belum masuk</label>`:''}
     </div>
     <div class="tbl-wrap"><table class="prev-tbl">
       <thead><tr>
@@ -2198,7 +2212,7 @@ window.parseImport = function(){
         <th class="r" style="width:80px">Qty</th>
         <th style="width:100px"></th>
       </tr></thead>
-      <tbody id="impBody2">${importRows.map((r,i)=>impRowHtml(r,i)).join('')}</tbody>
+      <tbody id="impBody2">${renderImportRows()}</tbody>
     </table></div>
     <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
       <button class="btn ${jenis==='masuk'?'btn-g':'btn-t'}" onclick="doImport()" id="impGoBtn">💾 Simpan mutasi terpilih (${jenis.toUpperCase()})</button>
@@ -2231,7 +2245,19 @@ function impRowHtml(r, i){
     </td>
   </tr>`;
 }
+function renderImportRows(){
+  return importRows
+    .map((r,i)=>({r,i}))
+    .filter(x=>!importOnlyMissing || !x.r.dup)
+    .map(x=>impRowHtml(x.r,x.i))
+    .join('');
+}
 window.parseIdG = parseId;
+window.impSetOnlyMissing = function(onlyMissing){
+  importOnlyMissing = !!onlyMissing;
+  const body = $('impBody2');
+  if(body) body.innerHTML = renderImportRows();
+};
 window.impRowChecked = function(i, checked){
   if(importRows[i]) importRows[i].checked = !!checked;
 };
