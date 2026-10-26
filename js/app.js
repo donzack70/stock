@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, getDocs }
+import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, limit, serverTimestamp, writeBatch, getDocs, runTransaction }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // ===================== FIREBASE CONFIG (sama dengan app piutang) =====================
@@ -30,13 +30,26 @@ const rp = v => 'Rp ' + rpNum(v);
 const onlyDigits = s => String(s ?? '').replace(/[^\d]/g,'');
 const grpRibu = d => { const x = onlyDigits(d); return x ? parseInt(x,10).toLocaleString('id-ID') : ''; };
 window.grpRibuG = grpRibu; window.onlyDigitsG = onlyDigits;
+// Baca angka format Indonesia/Inggris. Pemisah yang muncul paling akhir dianggap desimal;
+// pemisah yang berulang (1.234.567 atau 1,234,567) dianggap pemisah ribuan.
+// Catatan: "1.500" (satu titik, tiga digit) tetap dibaca 1,5 — ambigu, lihat laporan.
 const parseId = v => { let s = String(v ?? '').trim(); if(!s) return 0;
-  if(s.includes(',')) s = s.replace(/\./g,'').replace(',','.');
-  return parseFloat(s.replace(/[^0-9.\-]/g,'')) || 0; };
-const isoToDisp = iso => { if(!iso) return ''; const p = String(iso).split('-'); return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : iso; };
+  s = s.replace(/[^0-9.,\-]/g,'');
+  const adaK = s.includes(','), adaT = s.includes('.');
+  if(adaK && adaT){
+    if(s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g,'').replace(',','.');
+    else s = s.replace(/,/g,'');
+  } else if(adaK){
+    s = (s.match(/,/g).length > 1) ? s.replace(/,/g,'') : s.replace(',','.');
+  } else if(adaT && s.match(/\./g).length > 1){
+    s = s.replace(/\./g,'');
+  }
+  return parseFloat(s) || 0; };
+const isoToDisp = iso => { if(!iso) return ''; const p = String(iso).split('-'); return esc(p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : iso); };
 const dispToIso = d => { const p = String(d||'').trim().split('/'); return p.length===3 ? p[2]+'-'+pad2(parseInt(p[1])||1)+'-'+pad2(parseInt(p[0])||1) : ''; };
 function showMsg(id, txt, ms=3500){ const el=$(id); el.textContent=txt; el.style.display='block'; if(ms) setTimeout(()=>el.style.display='none', ms); }
-const todayIso = () => new Date().toISOString().slice(0,10);
+// Tanggal lokal perangkat (WIB). toISOString() memakai UTC sehingga 00.00-07.00 WIB terbaca kemarin.
+const todayIso = () => { const d = new Date(); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); };
 const userEmail = () => auth && auth.currentUser ? auth.currentUser.email : '';
 
 function validIsoDate(iso){
@@ -135,7 +148,8 @@ window.exportBackup = async function(){
     a.download = `backup-stok-${todayIso()}.json`;
     document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(a.href);
+    const hrefBackup = a.href;
+    setTimeout(()=>URL.revokeObjectURL(hrefBackup), 4000);
     document.body.removeChild(a);
     showMsg('backupOk','✔ Backup JSON berhasil dibuat.', 6000);
     await auditLog('backup_export', { collections:Object.keys(data.collections) });
@@ -157,7 +171,8 @@ function drumStr(kg, isiDrum){
 }
 
 // ===================== STATE =====================
-let auth=null, db=null, unsub=null, unsubSales=null, unsubSaleImports=null;
+let auth=null, db=null, unsub=null, unsubSales=null, unsubSaleImports=null, unsubArchive=null;
+let lastLockMs = 0;                 // waktu kunci opname terakhir (ms), dari koleksi arsip
 let items = [];
 let sales = [];
 let saleImports = [];
@@ -185,6 +200,70 @@ const selisihOf = it => { const f = fisikKgOf(it); return f===null ? null : Math
 const hargaOf = it => parseFloat(it.harga)||0;
 const nilaiOf = it => teoritisOf(it) * hargaOf(it);
 
+// ===================== PENANDA MUTASI & TRANSAKSI AMAN (anti-timpa data) =====================
+// Mutasi disimpan sebagai array di dalam dokumen barang. Dulu array itu ditulis ulang dari salinan
+// di layar, sehingga perubahan user/perangkat lain yang masuk di antaranya hilang. Sekarang setiap
+// perubahan membaca ulang dokumen dari server di dalam transaksi.
+// Batas pengaman jumlah baris per simpan. Firestore membatasi ukuran satu permintaan 10 MiB dan waktu transaksi
+// 270 detik (batas lama 500 penulisan sudah tidak tercantum di dokumentasi). ±400 byte per baris penjualan.
+const MAX_TULIS = 8000;
+const sigOf = m => m ? [m.jenis||'', m.tanggal||'', qtyKey(m.qty), m.ref||'', m.pihak||'', m.noNota||'', m.saleId||'', m.mixId||'', m.mixRole||''].join('|') : '';
+const sigAttr = m => esc(sigOf(m));
+// Cari mutasi di salinan lokal: pakai indeks bila penandanya cocok, kalau tidak cari lewat penanda.
+function findMutLocal(it, idx, sig){
+  const arr = (it && it.mutasi) || [];
+  if(sig == null) return arr[idx] ? { m:arr[idx], j:idx } : null;
+  if(arr[idx] && sigOf(arr[idx]) === sig) return { m:arr[idx], j:idx };
+  const j = arr.findIndex(x => sigOf(x) === sig);
+  return j >= 0 ? { m:arr[j], j } : null;
+}
+// Sama, tetapi untuk array segar di dalam transaksi; melempar error bila mutasi sudah berubah.
+function locateMut(arr, idx, sig){
+  if(sig == null){
+    if(arr[idx]) return idx;
+    throw new Error('Mutasi tidak ditemukan. Muat ulang halaman lalu coba lagi.');
+  }
+  if(arr[idx] && sigOf(arr[idx]) === sig) return idx;
+  const j = arr.findIndex(x => sigOf(x) === sig);
+  if(j < 0) throw new Error('Mutasi ini sudah diubah atau dihapus oleh orang lain. Muat ulang halaman lalu coba lagi.');
+  return j;
+}
+// Jalankan perubahan pada beberapa dokumen barang secara atomik. `build(fresh, tx)` boleh mengubah
+// fresh[id].mutasi dan memakai tx.set/update/delete untuk dokumen lain. Semua tx.get HARUS dilakukan
+// di awal build (sebelum tulis). Fungsi build bisa dijalankan ulang oleh Firestore, jadi jangan
+// mengubah variabel di luar `fresh` di dalamnya.
+async function runItemTx(itemIds, build){
+  const ids = [...new Set((itemIds||[]).filter(Boolean))];
+  return runTransaction(db, async tx => {
+    const fresh = {};
+    for(const id of ids){
+      const snap = await tx.get(doc(db, COLL, id));
+      if(!snap.exists()) throw new Error('Barang tidak ditemukan (mungkin baru dihapus orang lain).');
+      const data = snap.data();
+      fresh[id] = { id, ...data, mutasi: Array.isArray(data.mutasi) ? [...data.mutasi] : [] };
+    }
+    const result = await build(fresh, tx);
+    ids.forEach(id => tx.update(doc(db, COLL, id), { mutasi: fresh[id].mutasi }));
+    return result;
+  });
+}
+// Draf edit mutasi memakai indeks array; buang bila mutasi barang itu berubah dari sumber lain.
+function dropStaleMutDrafts(newItems){
+  for(const key of Object.keys(mutDraft)){
+    const itemId = key.split('#')[0];
+    const a = items.find(x=>x.id===itemId), b = newItems.find(x=>x.id===itemId);
+    if(JSON.stringify(a ? (a.mutasi||[]) : []) !== JSON.stringify(b ? (b.mutasi||[]) : [])) delete mutDraft[key];
+  }
+}
+// Hindari membangun ulang elemen yang isinya sama (menutup dropdown / daftar saran yang sedang terbuka).
+const _htmlCache = {};
+function setHtmlCached(id, html){
+  const el = $(id);
+  if(!el || _htmlCache[id] === html) return;
+  _htmlCache[id] = html;
+  el.innerHTML = html;
+}
+
 // ===================== FIREBASE INIT =====================
 const fbApp = initializeApp(firebaseConfig);
 auth = getAuth(fbApp);
@@ -206,6 +285,7 @@ onAuthStateChanged(auth, user => {
     if(unsub){ unsub(); unsub=null; }
     if(unsubSales){ unsubSales(); unsubSales=null; }
     if(unsubSaleImports){ unsubSaleImports(); unsubSaleImports=null; }
+    if(unsubArchive){ unsubArchive(); unsubArchive=null; }
   }
 });
 
@@ -295,7 +375,7 @@ function prepareFreshSessionView(){
   const saleHistoryToggle = $('saleHistoryToggle');
   if(saleHistoryToggle) saleHistoryToggle.textContent = 'Lihat riwayat';
 
-  ['saleModal','editModal','histModal','histMutModal','mixDetailModal'].forEach(removeShowIfExists);
+  ['saleModal','editModal','histModal','histMutModal','mixDetailModal','bulkJenisModal'].forEach(removeShowIfExists);
   resetMixForm(false);
 }
 
@@ -303,9 +383,12 @@ function startListening(){
   if(unsub) unsub();
   if(unsubSales) unsubSales();
   if(unsubSaleImports) unsubSaleImports();
+  if(unsubArchive) unsubArchive();
   const q = query(collection(db, COLL), orderBy('nama'));
   unsub = onSnapshot(q, snap => {
-    items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const newItems = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    dropStaleMutDrafts(newItems);
+    items = newItems;
     renderAll();
   }, err => {
     alert('Gagal membaca database: '+err.message+'\n\nCek Rules Firestore — koleksi "'+COLL+'" harus diizinkan untuk user login.');
@@ -328,6 +411,17 @@ function startListening(){
     if($('saleImportHistory')) renderSaleImportHistory();
   }, err => {
     console.warn('Gagal membaca riwayat import penjualan:', err);
+  });
+  // Penanda waktu kunci opname terakhir. Setelah opname, mutasi lama diarsipkan dan dikosongkan,
+  // sedangkan data penjualan tetap ada; tanpa penanda ini rekonsiliasi menandai semua penjualan lama
+  // sebagai "belum masuk stok" dan tombol "Buat mutasi stok" bisa mengurangi stok dua kali.
+  unsubArchive = onSnapshot(query(collection(db, ARCHIVE_COLL), orderBy('lockedAt','desc'), limit(1)), snap => {
+    const d = snap.docs[0] && snap.docs[0].data();
+    lastLockMs = d && d.lockedAt && typeof d.lockedAt.toMillis === 'function' ? d.lockedAt.toMillis() : 0;
+    renderRekonBadge();
+    if(curTab==='lapjual') renderRekonsiliasi();
+  }, err => {
+    console.warn('Gagal membaca penanda opname:', err);
   });
 }
 
@@ -364,6 +458,10 @@ function reconciliationKey(tanggal, pihak, nama, qty){
 }
 
 function reconciliationData(){
+  // Nama barang diambil dari master (lewat itemId) supaya penjualan lama tidak "putus" setelah barang diganti nama.
+  const nameById = new Map(items.map(it=>[it.id, it.nama]));
+  const saleName = s => (s.itemId && nameById.get(s.itemId)) || s.namaBarang || s.namaNota;
+  const sebelumKunci = s => lastLockMs > 0 && s.createdAt && typeof s.createdAt.toMillis === 'function' && s.createdAt.toMillis() < lastLockMs;
   const mutations = [];
   items.forEach(it => (it.mutasi||[]).forEach((m,idx) => {
     if(m.jenis==='keluar') mutations.push({ itemId:it.id, itemNama:it.nama, idx, ...m });
@@ -372,7 +470,7 @@ function reconciliationData(){
   const ignoredMutations = mutations.filter(m=>m.nonSale);
   const saleBuckets = new Map();
   sales.forEach(s => {
-    const key = reconciliationKey(s.tanggal,s.pelanggan,s.namaBarang||s.namaNota,s.qty);
+    const key = reconciliationKey(s.tanggal,s.pelanggan,saleName(s),s.qty);
     if(!saleBuckets.has(key)) saleBuckets.set(key,[]);
     saleBuckets.get(key).push(s);
   });
@@ -385,7 +483,7 @@ function reconciliationData(){
     if(match){ usedSales.add(match.id); matched++; }
     else missingSales.push(m);
   });
-  const missingMutations = sales.filter(s=>!usedSales.has(s.id));
+  const missingMutations = sales.filter(s=>!usedSales.has(s.id) && !sebelumKunci(s));
   return { matched, missingSales, missingMutations, ignoredMutations };
 }
 
@@ -480,27 +578,37 @@ window.setTab = function(t){
   renderAll();
 };
 
+let renderDeferred = false;
+function editingInside(id){
+  const a = document.activeElement, box = $(id);
+  return !!(a && box && box.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName));
+}
+// Data baru dari Firestore (misalnya rekan yang menyimpan hitungan fisik) tidak boleh membangun ulang
+// tabel yang sedang diketik. Tabel itu ditunda dan digambar ulang begitu kursor keluar dari kolom isian.
 function renderAll(){
   renderChips();
   renderKatOptions();
+  renderDeferred = false;
+  const tahan = id => { if(editingInside(id)){ renderDeferred = true; return true; } return false; };
   if(curTab==='dash') renderDash();
-  if(curTab==='stok') renderStok();
+  if(curTab==='stok' && !(stokEditMode && tahan('stokEditBody'))) renderStok();
   if(curTab==='lapstok') renderLaporanStok();
   if(curTab==='lapjual'){ renderLaporanJual(); renderSaleImportHistory(); renderRekonsiliasi(); }
-  if(curTab==='campur') renderMix();
-  if(curTab==='mutasi') renderMutasi();
-  if(curTab==='fisik') renderFisik();
+  if(curTab==='campur' && !(tahan('mixBody') || tahan('mixOutBody'))) renderMix();
+  if(curTab==='mutasi' && !tahan('mutBody')) renderMutasi();
+  if(curTab==='fisik' && !tahan('fisikBody')) renderFisik();
   renderRekonBadge();
-  $('itemList').innerHTML = items.map(it=>`<option value="${esc(it.nama)}">`).join('');
+  setHtmlCached('itemList', items.map(it=>`<option value="${esc(it.nama)}">`).join(''));
+  if(histDocId && $('histModal').classList.contains('show')) refreshHist();
 }
 
 function renderKatOptions(){
   const kats = [...new Set(items.map(it=>it.kat).filter(Boolean))].sort();
   ['fltKat','fisKat','lapStokKat'].forEach(id => {
     const sel = $(id); const cur = sel.value;
-    sel.innerHTML = '<option value="">Semua kategori</option>' + kats.map(k=>`<option${k===cur?' selected':''}>${esc(k)}</option>`).join('');
+    setHtmlCached(id, '<option value="">Semua kategori</option>' + kats.map(k=>`<option${k===cur?' selected':''}>${esc(k)}</option>`).join(''));
   });
-  $('katList').innerHTML = kats.map(k=>`<option value="${esc(k)}">`).join('');
+  setHtmlCached('katList', kats.map(k=>`<option value="${esc(k)}">`).join(''));
 }
 
 function renderChips(){
@@ -522,6 +630,7 @@ function renderChips(){
 function renderSalesDashboard(){
   if(!$('dashSalesSum')) return;
   const today = todayIso();
+  const nameById = new Map(items.map(it=>[it.id, it.nama]));
   const monthPrefix = today.slice(0,7);
   const todaySales = sales.filter(s=>s.tanggal===today);
   const monthSales = sales.filter(s=>String(s.tanggal||'').startsWith(monthPrefix));
@@ -548,7 +657,7 @@ function renderSalesDashboard(){
 
   const byItem = {};
   sales.forEach(s=>{
-    const k = s.namaBarang || s.namaNota || '(tanpa barang)';
+    const k = (s.itemId && nameById.get(s.itemId)) || s.namaBarang || s.namaNota || '(tanpa barang)';
     if(!byItem[k]) byItem[k] = { qty:0, total:0, sat:s.sat||'' };
     byItem[k].qty += parseFloat(s.qty)||0;
     byItem[k].total += parseFloat(s.subtotal)||0;
@@ -897,7 +1006,7 @@ window.stokSaveAll = async function(){
   }
   for(const it of items){
     const d = stokDraft[it.id];
-    const nm = (d ? d.nama : it.nama).trim().toLowerCase();
+    const nm = normalizeName(d ? d.nama : it.nama);
     if(finalNames.has(nm)){
       alert(`Nama barang duplikat: "${d ? d.nama.trim() : it.nama}". Perbaiki dulu supaya import mutasi tidak salah target.`);
       return;
@@ -944,8 +1053,20 @@ function splitPasteLines(raw){
     .map(l => l.split('\t').map(c => String(c||'').trim()));
 }
 
+// Harga: "205,000" / "Rp205.000" = 205000 (pemisah ribuan); "2500.00" / "12.500,50" = desimal (dibulatkan).
+// Dulu semua non-angka dibuang sehingga "2,500.00" terbaca 250000 (100x lipat).
 function parseHargaValue(v){
-  const digits = onlyDigits(v);
+  const s = String(v ?? '').replace(/rp/ig,'').replace(/\s/g,'');
+  if(!s) return 0;
+  const lastSep = Math.max(s.lastIndexOf(','), s.lastIndexOf('.'));
+  if(lastSep >= 0){
+    const tail = s.slice(lastSep+1).replace(/\D/g,'');
+    if(tail.length >= 1 && tail.length <= 2){
+      const intPart = onlyDigits(s.slice(0,lastSep));
+      return Math.round(parseFloat((intPart || '0') + '.' + tail)) || 0;
+    }
+  }
+  const digits = onlyDigits(s);
   return digits ? parseInt(digits,10) : 0;
 }
 
@@ -1028,7 +1149,7 @@ window.parseHarga = function(){
   }
   if(!hargaParsed.length){ showMsg('hImpErr','Tidak ada baris harga yang bisa dibaca.', 6000); return; }
 
-  const contoh = hargaParsed.slice(0,12).map((p,i)=>`
+  const contoh = hargaParsed.map((p,i)=>`
     <tr>
       <td><input type="checkbox" id="hImpC_${i}" ${p.checked?'checked':''} ${!p.itemId || p.hargaLama===p.harga?'disabled':''} onchange="hargaCheck(${i},this.checked)" style="width:15px;height:15px"></td>
       <td class="nama-cell">${esc(p.nama)}</td>
@@ -1050,7 +1171,6 @@ window.parseHarga = function(){
       <thead><tr><th style="width:30px"></th><th>Nama di paste</th><th>Barang stok</th><th class="r">Harga lama</th><th class="r">Harga baru</th></tr></thead>
       <tbody>${contoh}</tbody>
     </table></div>
-    ${hargaParsed.length>12?`<div class="hint" style="margin-top:5px">Preview menampilkan 12 dari ${hargaParsed.length} baris terbaca.</div>`:''}
     <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-t btn-sm" onclick="importHargaGo()" id="hImpBtn">💾 Update harga tercentang</button>
       <span class="hint" style="margin:0">Baris fuzzy tidak dicentang otomatis supaya tidak salah barang.</span>
@@ -1089,6 +1209,7 @@ window.toggleMasterImp = function(){
 };
 
 let masterParsed = [];
+let masterCols = {};               // kolom apa saja yang terdeteksi pada paste master terakhir
 
 window.parseMaster = function(){
   $('mImpErr').style.display='none';
@@ -1107,21 +1228,22 @@ window.parseMaster = function(){
   const iIsi  = findCol(['isi/drum','isi drum','isi per drum','per drum','isidrum','drum'], ['sisa','stok']);
   const iHarga= findCol(['harga','price','hrg']);
   const iAwal = findCol(['stok awal','stock awal','stok','stock','awal','total','jumlah','sisa','qty'], ['drum','isi','harga']);
+  masterCols = { kat:iKat>=0, sat:iSat>=0, isiDrum:iIsi>=0, harga:iHarga>=0, stokAwal:iAwal>=0 };
 
-  const existing = new Map(items.map(it=>[it.nama.toLowerCase(), it]));
+  const existing = new Map(items.map(it=>[normalizeName(it.nama), it]));
   let nBaru=0, nAda=0;
   for(let i=1;i<lines.length;i++){
     const r = lines[i];
     const nama = String(r[iNama]||'').trim();
     if(!nama) continue;
-    const sudahAda = existing.has(nama.toLowerCase());
+    const sudahAda = existing.has(normalizeName(nama));
     if(sudahAda) nAda++; else nBaru++;
     masterParsed.push({
       nama, sudahAda,
       kat:  iKat>=0  ? String(r[iKat]||'').trim() : '',
       sat: (iSat>=0  ? String(r[iSat]||'').trim() : '') || 'kg',
       isiDrum: iIsi>=0  ? parseId(r[iIsi])  : 0,
-      harga: iHarga>=0 ? (parseInt(onlyDigits(r[iHarga]))||0) : 0,
+      harga: iHarga>=0 ? parseHargaValue(r[iHarga]) : 0,
       stokAwal: iAwal>=0 ? parseId(r[iAwal]) : 0
     });
   }
@@ -1151,7 +1273,7 @@ window.parseMaster = function(){
       <button class="btn btn-t btn-sm" onclick="importMasterGo()" id="mImpBtn">💾 Import ${masterParsed.length} barang</button>
       ${nAda?`<label style="font-size:12px;color:#666;display:flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" id="mImpUpdate" checked style="width:15px;height:15px">
-        perbarui ${nAda} barang yang sudah ada (timpa kategori, sat, isi/drum, harga &amp; stok awal — riwayat mutasi tetap aman)
+        perbarui ${nAda} barang yang sudah ada (hanya kolom yang ikut di-paste yang ditimpa — riwayat mutasi tetap aman)
       </label>`:''}
     </div>
     <div class="hint" style="margin-top:4px">${nBaru} barang baru${nAda?`, ${nAda} sudah ada di daftar stok`:''}.</div>`;
@@ -1160,20 +1282,28 @@ window.parseMaster = function(){
 window.importMasterGo = async function(){
   if(!masterParsed.length) return;
   const updateMode = $('mImpUpdate') ? $('mImpUpdate').checked : false;
-  const existing = new Map(items.map(it=>[it.nama.toLowerCase(), it]));
+  const existing = new Map(items.map(it=>[normalizeName(it.nama), it]));
   const btn = $('mImpBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Import...';
   let nBaru=0, nUpdate=0, nSkip=0;
   try {
     let batch = writeBatch(db), inBatch = 0;
     const sudahDiproses = new Set();
     for(const p of masterParsed){
-      const key = p.nama.toLowerCase();
+      const key = normalizeName(p.nama);
       if(sudahDiproses.has(key)) continue;
       sudahDiproses.add(key);
       const ada = existing.get(key);
       if(ada){
         if(!updateMode){ nSkip++; continue; }
-        batch.update(doc(db, COLL, ada.id), { nama:p.nama, kat:p.kat, sat:p.sat, isiDrum:p.isiDrum, harga:p.harga, stokAwal:p.stokAwal });
+        // Hanya kolom yang benar-benar ada di paste yang ditimpa (dulu kolom yang tidak ikut di-paste
+        // ikut dikosongkan: harga/kategori/stok awal semua barang menjadi 0).
+        const upd = { nama:p.nama };
+        if(masterCols.kat) upd.kat = p.kat;
+        if(masterCols.sat) upd.sat = p.sat;
+        if(masterCols.isiDrum) upd.isiDrum = p.isiDrum;
+        if(masterCols.harga) upd.harga = p.harga;
+        if(masterCols.stokAwal) upd.stokAwal = p.stokAwal;
+        batch.update(doc(db, COLL, ada.id), upd);
         nUpdate++;
       } else {
         batch.set(doc(collection(db, COLL)), { nama:p.nama, kat:p.kat, sat:p.sat, isiDrum:p.isiDrum, harga:p.harga, stokAwal:p.stokAwal, mutasi:[], fisik:null, createdAt: serverTimestamp() });
@@ -1418,6 +1548,11 @@ window.doJualImport = async function(kurangiStok){
     showMsg('jualErr','Ada baris tercentang yang sudah ada di mutasi stok. Pakai "Simpan penjualan saja" untuk melengkapi laporan, atau hilangkan centangnya.', 8000);
     return;
   }
+  const nItemTulis = kurangiStok ? new Set(rows.map(r=>findExact(r.target).id)).size : 0;
+  if(rows.length + nItemTulis + 1 > MAX_TULIS){
+    showMsg('jualErr', `Terlalu banyak baris sekaligus (${rows.length}). Pecah paste menjadi maksimal ${Math.max(1, MAX_TULIS - nItemTulis - 1)} baris per simpan supaya permintaan ke Firebase tidak terlalu besar.`, 10000);
+    return;
+  }
   if(check.warnings.length){
     const lanjut = confirm('PERINGATAN SEBELUM SIMPAN\n\n• '+check.warnings.join('\n• ')+'\n\nData tetap boleh disimpan. Sudah diperiksa dan ingin melanjutkan?');
     if(!lanjut) return;
@@ -1445,38 +1580,33 @@ window.doJualImport = async function(kurangiStok){
         });
       });
     }
-    let batch = writeBatch(db), n = 0;
-    const saleDocs = [];
-    for(const {r,it,saleRef} of prepared){
-      saleDocs.push({
-        id:saleRef.id, ref:r.ref, itemId:it.id, stockDeducted:!!kurangiStok,
-        subtotal:r.subtotal, importGroupId:importRef.id
-      });
-      batch.set(saleRef, {
-        tanggal:r.tanggal, pelanggan:r.pelanggan, kota:r.kota, noNota:r.noNota,
-        itemId:it.id, namaBarang:it.nama, namaNota:r.namaRaw,
-        qty:r.qty, sat:r.sat, harga:r.harga, subtotal:r.subtotal,
-        hargaMaster:r.hargaMaster||0, selisihHarga:r.selisihHarga||0,
-        stockDeducted: !!kurangiStok,
-        ref:r.ref, importGroupId:importRef.id,
-        createdBy:userEmail(), createdAt:serverTimestamp()
-      });
-      n++;
-    }
-    if(kurangiStok){
-      for(const id of Object.keys(byItem)){
-        const { it, add } = byItem[id];
-        batch.update(doc(db, COLL, id), { mutasi: [...(it.mutasi||[]), ...add] });
-        n++;
-      }
-    }
+    const saleDocs = prepared.map(({r,it,saleRef}) => ({
+      id:saleRef.id, ref:r.ref, itemId:it.id, stockDeducted:!!kurangiStok,
+      subtotal:r.subtotal, importGroupId:importRef.id
+    }));
     const total = rows.reduce((s,r)=>s+r.subtotal,0);
-    batch.set(importRef, {
-      jumlah:rows.length, jumlahAktif:rows.length, total, totalAktif:total, stockDeducted:!!kurangiStok,
-      status:'active', saleIds:saleDocs.map(x=>x.id),
-      createdBy:userEmail(), createdAt:serverTimestamp(), createdAtIso:new Date().toISOString()
+    // Satu transaksi: laporan penjualan + mutasi stok + catatan kelompok import. Array mutasi dibaca ulang dari server.
+    await runItemTx(kurangiStok ? Object.keys(byItem) : [], (fresh, tx) => {
+      for(const {r,it,saleRef} of prepared){
+        tx.set(saleRef, {
+          tanggal:r.tanggal, pelanggan:r.pelanggan, kota:r.kota, noNota:r.noNota,
+          itemId:it.id, namaBarang:it.nama, namaNota:r.namaRaw,
+          qty:r.qty, sat:r.sat, harga:r.harga, subtotal:r.subtotal,
+          hargaMaster:r.hargaMaster||0, selisihHarga:r.selisihHarga||0,
+          stockDeducted: !!kurangiStok,
+          ref:r.ref, importGroupId:importRef.id,
+          createdBy:userEmail(), createdAt:serverTimestamp()
+        });
+      }
+      if(kurangiStok){
+        for(const id of Object.keys(byItem)) fresh[id].mutasi.push(...byItem[id].add);
+      }
+      tx.set(importRef, {
+        jumlah:rows.length, jumlahAktif:rows.length, total, totalAktif:total, stockDeducted:!!kurangiStok,
+        status:'active', saleIds:saleDocs.map(x=>x.id),
+        createdBy:userEmail(), createdAt:serverTimestamp(), createdAtIso:new Date().toISOString()
+      });
     });
-    await batch.commit();
     lastSaleImport = {
       id:importRef.id, saleDocs, jumlah:rows.length, total,
       stockDeducted:!!kurangiStok, status:'active', createdAtIso:new Date().toISOString()
@@ -1485,7 +1615,8 @@ window.doJualImport = async function(kurangiStok){
     await auditLog(kurangiStok ? 'import_penjualan_stok' : 'import_penjualan_saja', { jumlah: rows.length, total, barang: Object.keys(byItem).length });
     showMsg('jualOk', `✔ ${rows.length} baris penjualan disimpan. Total ${rp(total)}.${kurangiStok?' Stok sudah dikurangi.':' Stok tidak diubah.'}`, 8000);
     $('jualTsv').value='';
-    setTimeout(()=>{ $('jualPreview').innerHTML=''; jualRows=[]; }, 2500);
+    const jualSelesai = jualRows;
+    setTimeout(()=>{ if(jualRows===jualSelesai){ $('jualPreview').innerHTML=''; jualRows=[]; } }, 8000);
   } catch(e){
     showMsg('jualErr','Gagal menyimpan penjualan: '+e.message, 8000);
     if(btnOnly){ btnOnly.disabled = false; btnOnly.textContent = '💾 Simpan penjualan saja'; }
@@ -1520,25 +1651,23 @@ window.undoSaleImport = async function(importId){
     (imp.stockDeducted ? 'Data laporan akan dihapus dan semua mutasi stok terkait ikut dihapus.' : 'Data laporan akan dihapus. Stok tidak berubah.');
   if(!confirm(msg)) return;
   try {
-    const batch = writeBatch(db);
-    groupSales.forEach(s => batch.delete(doc(db, SALES_COLL, s.id)));
-    if(imp.stockDeducted){
-      const itemIds = new Set(groupSales.map(s=>s.itemId).filter(Boolean));
-      for(const itemId of itemIds){
-        const it = items.find(x=>x.id===itemId); if(!it) continue;
+    const itemIds = imp.stockDeducted
+      ? [...new Set(groupSales.map(s=>s.itemId).filter(id => id && items.some(x=>x.id===id)))]
+      : [];
+    await runItemTx(itemIds, (fresh, tx) => {
+      groupSales.forEach(s => tx.delete(doc(db, SALES_COLL, s.id)));
+      itemIds.forEach(itemId => {
         const saleIds = new Set(groupSales.filter(s=>s.itemId===itemId).map(s=>s.id));
         const refs = new Set(groupSales.filter(s=>s.itemId===itemId).map(s=>s.ref));
-        const mutasi = (it.mutasi||[]).filter(m =>
+        fresh[itemId].mutasi = fresh[itemId].mutasi.filter(m =>
           m.importGroupId !== importId && !saleIds.has(m.saleId) &&
           !(m.sumber==='penjualan' && refs.has(m.ref)));
-        batch.update(doc(db, COLL, itemId), { mutasi });
-      }
-    }
-    batch.update(doc(db, SALES_IMPORT_COLL, importId), {
-      status:'undone', undoneAt:serverTimestamp(), undoneAtIso:new Date().toISOString(),
-      undoneBy:userEmail(), jumlahAktif:0
+      });
+      tx.update(doc(db, SALES_IMPORT_COLL, importId), {
+        status:'undone', undoneAt:serverTimestamp(), undoneAtIso:new Date().toISOString(),
+        undoneBy:userEmail(), jumlahAktif:0
+      });
     });
-    await batch.commit();
     await auditLog('undo_import_penjualan', { importGroupId:importId, jumlah:n, stockDeducted:!!imp.stockDeducted });
     if(lastSaleImport && lastSaleImport.id===importId) lastSaleImport = null;
     $('undoSaleBtn').style.display = 'none';
@@ -1618,8 +1747,8 @@ function renderRekonsiliasi(){
     <td class="nama-cell">${esc(m.itemNama)}</td>
     <td class="r">${num(m.qty)} ${esc(m.sat||'')}</td>
     <td style="white-space:nowrap">
-      <button class="btn btn-t btn-sm" onclick="openSaleFromMutation('${m.itemId}',${m.idx})">Buat penjualan</button>
-      <button class="btn btn-line btn-sm" onclick="markMutationNonSale('${m.itemId}',${m.idx},true)">Bukan penjualan</button>
+      <button class="btn btn-t btn-sm" data-sig="${sigAttr(m)}" onclick="openSaleFromMutation('${m.itemId}',${m.idx},this)">Buat penjualan</button>
+      <button class="btn btn-line btn-sm" data-sig="${sigAttr(m)}" onclick="markMutationNonSale('${m.itemId}',${m.idx},true,this)">Bukan penjualan</button>
     </td>
   </tr>`).join('');
   const saleRows = r.missingMutations.map(s=>`<tr>
@@ -1634,7 +1763,7 @@ function renderRekonsiliasi(){
     <td>${esc(m.pihak||'')}</td>
     <td class="nama-cell">${esc(m.itemNama)}</td>
     <td class="r">${num(m.qty)} ${esc(m.sat||'')}</td>
-    <td><button class="btn btn-line btn-sm" onclick="markMutationNonSale('${m.itemId}',${m.idx},false)">Kembalikan</button></td>
+    <td><button class="btn btn-line btn-sm" data-sig="${sigAttr(m)}" onclick="markMutationNonSale('${m.itemId}',${m.idx},false,this)">Kembalikan</button></td>
   </tr>`).join('');
   el.innerHTML = `
     <div class="mut-sum">
@@ -1660,19 +1789,24 @@ function renderRekonsiliasi(){
     </table></div>`:''}`;
 }
 
-window.markMutationNonSale = async function(itemId, idx, value){
-  const it = items.find(x=>x.id===itemId), m = it && (it.mutasi||[])[idx];
+window.markMutationNonSale = async function(itemId, idx, value, el){
+  const it = items.find(x=>x.id===itemId);
+  const sig = (el && el.dataset && el.dataset.sig != null) ? el.dataset.sig : null;
+  const f = findMutLocal(it, idx, sig), m = f && f.m;
   if(!it || !m) return;
   const text = value ? 'Tandai mutasi ini sebagai bukan penjualan?' : 'Kembalikan mutasi ini ke pemeriksaan penjualan?';
   if(!confirm(text)) return;
-  const arr = [...(it.mutasi||[])];
-  arr[idx] = {
-    ...m, nonSale:!!value,
-    nonSaleAt:value ? new Date().toISOString() : '',
-    nonSaleBy:value ? userEmail() : ''
-  };
+  const sigPakai = sig != null ? sig : sigOf(m);
   try {
-    await updateDoc(doc(db,COLL,itemId),{ mutasi:arr });
+    await runItemTx([itemId], fresh => {
+      const arr = fresh[itemId].mutasi;
+      const j = locateMut(arr, f.j, sigPakai);
+      arr[j] = {
+        ...arr[j], nonSale:!!value,
+        nonSaleAt:value ? new Date().toISOString() : '',
+        nonSaleBy:value ? userEmail() : ''
+      };
+    });
     await auditLog(value?'mutasi_bukan_penjualan':'mutasi_kembali_rekonsiliasi',{ barang:it.nama, tanggal:m.tanggal, qty:m.qty });
   } catch(e){ alert('Gagal memperbarui mutasi: '+e.message); }
 };
@@ -1686,10 +1820,14 @@ window.applySaleToStock = async function(id){
   if(!confirm(`Buat mutasi stok keluar untuk penjualan ${s.pelanggan||''} - ${it.nama} ${num(s.qty)} ${s.sat||''}?${warning}`)) return;
   try {
     const linked = { ...s, stockDeducted:true };
-    const batch = writeBatch(db);
-    batch.update(doc(db,SALES_COLL,id),{ stockDeducted:true, updatedAt:serverTimestamp(), updatedBy:userEmail() });
-    batch.update(doc(db,COLL,it.id),{ mutasi:[...(it.mutasi||[]),saleMutationFor(linked,it)] });
-    await batch.commit();
+    await runItemTx([it.id], async (fresh, tx) => {
+      // baca ulang penjualan: jangan kurangi stok dua kali bila sudah diproses perangkat lain
+      const saleSnap = await tx.get(doc(db, SALES_COLL, id));
+      if(!saleSnap.exists()) throw new Error('Penjualan ini sudah dihapus.');
+      if(saleSnap.data().stockDeducted) throw new Error('Penjualan ini sudah mengurangi stok (mungkin baru diproses perangkat lain).');
+      fresh[it.id].mutasi.push(saleMutationFor(linked, it));
+      tx.update(doc(db,SALES_COLL,id),{ stockDeducted:true, updatedAt:serverTimestamp(), updatedBy:userEmail() });
+    });
     await auditLog('rekonsiliasi_buat_mutasi',{ saleId:id, barang:it.nama, qty:s.qty });
     showMsg('lapJualOk','Mutasi stok berhasil dibuat.',5000);
   } catch(e){ alert('Gagal membuat mutasi stok: '+e.message); }
@@ -1773,20 +1911,11 @@ function removeSaleMutation(item, sale){
   return arr;
 }
 
-async function syncSaleMutation(batch, oldSale, newSale){
-  if(!oldSale.stockDeducted) return;
-  const oldItem = items.find(it => it.id === oldSale.itemId) || findExact(oldSale.namaBarang);
-  const newItem = items.find(it => it.id === newSale.itemId) || findExact(newSale.namaBarang);
-  if(!oldItem || !newItem) throw new Error('Barang stok untuk mutasi penjualan tidak ditemukan.');
-  const oldArr = removeSaleMutation(oldItem, oldSale);
-  const newMut = saleMutationFor(newSale, newItem);
-  if(oldItem.id === newItem.id){
-    oldArr.push(newMut);
-    batch.update(doc(db, COLL, oldItem.id), { mutasi: oldArr });
-  } else {
-    batch.update(doc(db, COLL, oldItem.id), { mutasi: oldArr });
-    batch.update(doc(db, COLL, newItem.id), { mutasi: [...(newItem.mutasi||[]), newMut] });
-  }
+// Pindahkan/ubah mutasi stok milik sebuah penjualan di dalam transaksi (fresh = hasil runItemTx).
+function syncSaleMutation(fresh, oldItemId, newItemId, oldSale, newSale){
+  const oldIt = fresh[oldItemId], newIt = fresh[newItemId];
+  oldIt.mutasi = removeSaleMutation(oldIt, oldSale);
+  newIt.mutasi.push(saleMutationFor(newSale, newIt));
 }
 
 window.editSale = function(id){
@@ -1809,11 +1938,13 @@ window.editSale = function(id){
   $('saleModal').classList.add('show');
 };
 
-window.openSaleFromMutation = function(itemId,idx){
-  const it = items.find(x=>x.id===itemId), m = it && (it.mutasi||[])[idx];
+window.openSaleFromMutation = function(itemId,idx,el){
+  const it = items.find(x=>x.id===itemId);
+  const sig0 = (el && el.dataset && el.dataset.sig != null) ? el.dataset.sig : null;
+  const f = findMutLocal(it, idx, sig0), m = f && f.m;
   if(!it || !m) return;
   saleEditId = null;
-  saleCreateMutation = { itemId, idx };
+  saleCreateMutation = { itemId, idx:f.j, sig:sigOf(m) };
   $('saleEditTitle').textContent = 'Buat Penjualan dari Mutasi';
   $('saleEditSub').textContent = 'Stok sudah berkurang. Lengkapi harga jual lalu simpan ke laporan penjualan.';
   $('saleEditErr').style.display='none';
@@ -1855,7 +1986,7 @@ window.updateSaleEditCalc = function(){
 async function saveSaleFromMutation(){
   const src = saleCreateMutation;
   const it = src && items.find(x=>x.id===src.itemId);
-  const m = it && (it.mutasi||[])[src.idx];
+  const fm = it && findMutLocal(it, src.idx, src.sig), m = fm && fm.m;
   if(!it || !m){ showMsg('saleEditErr','Mutasi asal sudah berubah. Tutup lalu buka pemeriksaan kembali.',7000); return; }
   const pd = parseImportDate($('seTanggal').value);
   const qty = parseId($('seQty').value);
@@ -1878,19 +2009,20 @@ async function saveSaleFromMutation(){
     stockDeducted:true, ref, sumber:'rekonsiliasi',
     createdBy:userEmail(), createdAt:serverTimestamp()
   };
-  const arr = [...(it.mutasi||[])];
-  arr[src.idx] = {
-    ...m, jenis:'keluar', tanggal:pd.iso, pihak:pelanggan, noNota, qty, sat,
+  const newFields = {
+    jenis:'keluar', tanggal:pd.iso, pihak:pelanggan, noNota, qty, sat,
     hargaJual:harga, subtotal, ref, sumber:'penjualan', saleId:saleRef.id,
     nonSale:false, nonSaleAt:'', nonSaleBy:''
   };
   const btn=$('saleEditSaveBtn'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Menyimpan...';
   try {
-    const batch=writeBatch(db);
-    const {id,...payload}=sale;
-    batch.set(saleRef,payload);
-    batch.update(doc(db,COLL,it.id),{mutasi:arr});
-    await batch.commit();
+    await runItemTx([it.id], (fresh, tx) => {
+      const arr = fresh[it.id].mutasi;
+      const j = locateMut(arr, src.idx, src.sig);
+      arr[j] = { ...arr[j], ...newFields };
+      const {id,...payload} = sale;
+      tx.set(saleRef, payload);
+    });
     await auditLog('rekonsiliasi_buat_penjualan',{saleId:saleRef.id,barang:it.nama,qty,total:subtotal});
     closeSaleEdit();
     showMsg('lapJualOk','Penjualan berhasil dibuat dari mutasi stok.',5000);
@@ -1923,26 +2055,35 @@ window.saveSaleEdit = async function(){
   });
   const btn = $('saleEditSaveBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
   try {
-    const batch = writeBatch(db);
-    batch.update(doc(db, SALES_COLL, saleEditId), {
-      tanggal:updated.tanggal, pelanggan:updated.pelanggan, kota:updated.kota, noNota:updated.noNota,
-      itemId:updated.itemId, namaBarang:updated.namaBarang, qty:updated.qty, sat:updated.sat,
-      harga:updated.harga, subtotal:updated.subtotal,
-      hargaMaster:updated.hargaMaster, selisihHarga:updated.selisihHarga, ref:updated.ref,
-      updatedAt:serverTimestamp(), updatedBy:userEmail()
-    });
-    await syncSaleMutation(batch, s, updated);
-    if(s.importGroupId){
-      const imp = saleImports.find(x=>x.id===s.importGroupId);
-      if(imp){
-        const currentTotal = imp.totalAktif===undefined ? imp.total : imp.totalAktif;
-        batch.update(doc(db, SALES_IMPORT_COLL, s.importGroupId), {
-          totalAktif:Math.max(0,(parseFloat(currentTotal)||0)-(parseFloat(s.subtotal)||0)+subtotal),
+    const saleDocId = saleEditId;
+    const oldItem = items.find(x => x.id === s.itemId) || findExact(s.namaBarang);
+    const itemIds = [];
+    if(s.stockDeducted){
+      if(!oldItem) throw new Error('Barang stok untuk mutasi penjualan tidak ditemukan.');
+      itemIds.push(oldItem.id, it.id);
+    }
+    await runItemTx(itemIds, async (fresh, tx) => {
+      const impSnap = s.importGroupId ? await tx.get(doc(db, SALES_IMPORT_COLL, s.importGroupId)) : null;
+      const saleSnap = await tx.get(doc(db, SALES_COLL, saleDocId));
+      if(!saleSnap.exists()) throw new Error('Penjualan ini sudah dihapus oleh orang lain.');
+      const subtotalLama = parseFloat(saleSnap.data().subtotal)||0;
+      tx.update(doc(db, SALES_COLL, saleDocId), {
+        tanggal:updated.tanggal, pelanggan:updated.pelanggan, kota:updated.kota, noNota:updated.noNota,
+        itemId:updated.itemId, namaBarang:updated.namaBarang, qty:updated.qty, sat:updated.sat,
+        harga:updated.harga, subtotal:updated.subtotal,
+        hargaMaster:updated.hargaMaster, selisihHarga:updated.selisihHarga, ref:updated.ref,
+        updatedAt:serverTimestamp(), updatedBy:userEmail()
+      });
+      if(s.stockDeducted) syncSaleMutation(fresh, oldItem.id, it.id, s, updated);
+      if(impSnap && impSnap.exists()){
+        const d = impSnap.data();
+        const currentTotal = d.totalAktif===undefined ? d.total : d.totalAktif;
+        tx.update(doc(db, SALES_IMPORT_COLL, s.importGroupId), {
+          totalAktif:Math.max(0,(parseFloat(currentTotal)||0)-subtotalLama+subtotal),
           updatedAt:serverTimestamp()
         });
       }
-    }
-    await batch.commit();
+    });
     await auditLog('penjualan_edit', { id:saleEditId, pelanggan:updated.pelanggan, barang:updated.namaBarang, subtotal:updated.subtotal, stockDeducted:!!updated.stockDeducted });
     closeSaleEdit();
     showMsg('lapJualOk','✔ Penjualan berhasil diperbarui.', 5000);
@@ -1956,28 +2097,29 @@ window.deleteSale = async function(id){
     (s.stockDeducted ? 'Mutasi stok keluar yang terkait juga akan dihapus.' : 'Stok tidak akan berubah karena penjualan ini tidak mengurangi stok.');
   if(!confirm(msg)) return;
   try {
-    const batch = writeBatch(db);
-    batch.delete(doc(db, SALES_COLL, id));
+    let itemId = null;
     if(s.stockDeducted){
       const it = items.find(x=>x.id===s.itemId) || findExact(s.namaBarang);
       if(!it) throw new Error('Barang stok untuk menghapus mutasi tidak ditemukan.');
-      batch.update(doc(db, COLL, it.id), { mutasi: removeSaleMutation(it, s) });
+      itemId = it.id;
     }
-    if(s.importGroupId){
-      const imp = saleImports.find(x=>x.id===s.importGroupId);
-      if(imp){
-        const currentCount = imp.jumlahAktif===undefined ? imp.jumlah : imp.jumlahAktif;
-        const currentTotal = imp.totalAktif===undefined ? imp.total : imp.totalAktif;
+    await runItemTx(itemId ? [itemId] : [], async (fresh, tx) => {
+      const impSnap = s.importGroupId ? await tx.get(doc(db, SALES_IMPORT_COLL, s.importGroupId)) : null;
+      tx.delete(doc(db, SALES_COLL, id));
+      if(itemId) fresh[itemId].mutasi = removeSaleMutation(fresh[itemId], s);
+      if(impSnap && impSnap.exists()){
+        const d = impSnap.data();
+        const currentCount = d.jumlahAktif===undefined ? d.jumlah : d.jumlahAktif;
+        const currentTotal = d.totalAktif===undefined ? d.total : d.totalAktif;
         const nextCount = Math.max(0,(parseInt(currentCount)||0)-1);
-        batch.update(doc(db, SALES_IMPORT_COLL, s.importGroupId), {
+        tx.update(doc(db, SALES_IMPORT_COLL, s.importGroupId), {
           jumlahAktif:nextCount,
           totalAktif:Math.max(0,(parseFloat(currentTotal)||0)-(parseFloat(s.subtotal)||0)),
           status:nextCount ? 'active' : 'empty',
           updatedAt:serverTimestamp()
         });
       }
-    }
-    await batch.commit();
+    });
     await auditLog('penjualan_hapus', { id, pelanggan:s.pelanggan||'', barang:s.namaBarang||'', subtotal:s.subtotal||0, stockDeducted:!!s.stockDeducted });
     showMsg('lapJualOk','✔ Penjualan berhasil dihapus.', 5000);
   } catch(e){ alert('Gagal hapus penjualan: '+e.message); }
@@ -2009,7 +2151,7 @@ window.saveEdit = async function(){
   $('eErr').style.display='none';
   const nama = $('eNama').value.trim();
   if(!nama){ showMsg('eErr','Nama belum diisi.'); return; }
-  const dupe = items.find(it => it.nama.toLowerCase() === nama.toLowerCase() && it.id !== editDocId);
+  const dupe = items.find(it => normalizeName(it.nama) === normalizeName(nama) && it.id !== editDocId);
   if(dupe){ showMsg('eErr','Nama barang ini sudah ada.'); return; }
   const payload = {
     nama, kat: $('eKat').value.trim(), sat: $('eSat').value.trim()||'kg',
@@ -2055,17 +2197,20 @@ function refreshHist(){
         <span class="tag ${m.jenis==='masuk'?'tag-masuk':'tag-keluar'}">${m.jenis==='masuk'?'MASUK':'KELUAR'}</span>
         <span style="font-weight:600">${num(m.qty)} ${esc(m.sat||'')}</span>
         <span style="color:#888;flex:1">${esc(m.pihak||'')} ${m.noNota?'· '+esc(m.noNota):''}</span>
-        <button class="icon-btn" onclick="openHistMutEdit(${m._i})" title="Edit mutasi">✏️</button>
-        <button class="icon-btn danger" onclick="delMutasi(${m._i})">✕</button>
+        <button class="icon-btn" data-sig="${sigAttr(m)}" onclick="openHistMutEdit(${m._i},this)" title="Edit mutasi">✏️</button>
+        <button class="icon-btn danger" data-sig="${sigAttr(m)}" onclick="delMutasi(${m._i},this)">✕</button>
       </div>`).join('')
     : `<div class="hist-row" style="color:#bbb">Belum ada mutasi untuk barang ini.</div>`;
 }
 
-window.openHistMutEdit = function(idx){
-  const it = items.find(x=>x.id===histDocId), m = it && (it.mutasi||[])[idx];
-  if(!it || !m) return;
+window.openHistMutEdit = function(idx, el){
+  const it = items.find(x=>x.id===histDocId);
+  const sig0 = (el && el.dataset && el.dataset.sig != null) ? el.dataset.sig : null;
+  const f = findMutLocal(it, idx, sig0), m = f && f.m;
+  if(!it || !m){ alert('Mutasi ini sudah berubah. Tutup lalu buka ulang riwayat.'); return; }
+  idx = f.j;
   const linked = linkedSaleForMutation(m,it.nama);
-  histMutEdit = { itemId:it.id, idx };
+  histMutEdit = { itemId:it.id, idx, sig:sigOf(m) };
   $('histMutErr').style.display='none';
   $('histMutSub').textContent = linked
     ? `Terhubung ke penjualan ${linked.pelanggan||''}. Perubahan barang, tanggal, qty, pihak, dan nota akan diterapkan juga ke laporan penjualan.`
@@ -2097,14 +2242,14 @@ window.saveHistMutEdit = async function(){
   if(qty<=0){ showMsg('histMutErr','Qty harus lebih dari 0.',5000); return; }
   const d={
     jenis:$('hmJenis').value, tanggal, barang, qty,
-    pihak:$('hmPihak').value, noNota:$('hmNota').value
+    pihak:$('hmPihak').value, noNota:$('hmNota').value, sig:histMutEdit.sig
   };
   await saveMutationChange(histMutEdit.itemId,histMutEdit.idx,d,$('histMutSaveBtn'));
   if($('histMutSaveBtn')){ $('histMutSaveBtn').disabled=false; $('histMutSaveBtn').textContent='Simpan'; }
 };
 
-window.delMutasi = async function(i){
-  await deleteMutation(histDocId,i,'mutasi_hapus_riwayat');
+window.delMutasi = async function(i, el){
+  await deleteMutation(histDocId,i,'mutasi_hapus_riwayat', (el && el.dataset && el.dataset.sig != null) ? el.dataset.sig : null);
   if(histDocId) setTimeout(refreshHist,400);
 };
 
@@ -2312,16 +2457,14 @@ window.doImport = async function(){
       if(!byItem[it.id]) byItem[it.id] = { it, add: [] };
       byItem[it.id].add.push({ jenis:r.jenis, tanggal:r.tanggal, qty:r.qty, sat:r.sat, pihak:r.pihak, noNota:r.noNota, ref:r.ref });
     });
-    const batch = writeBatch(db);
-    for(const id of Object.keys(byItem)){
-      const { it, add } = byItem[id];
-      batch.update(doc(db, COLL, id), { mutasi: [...(it.mutasi||[]), ...add] });
-    }
-    await batch.commit();
+    await runItemTx(Object.keys(byItem), fresh => {
+      for(const id of Object.keys(byItem)) fresh[id].mutasi.push(...byItem[id].add);
+    });
     await auditLog('import_mutasi', { jenis: importJenis, jumlah: rows.length, barang: Object.keys(byItem).length });
     showMsg('impOk', `✔ ${rows.length} mutasi (${importJenis}) disimpan ke ${Object.keys(byItem).length} barang.`, 6000);
     $('impTsv').value='';
-    setTimeout(()=>{ $('impPreview').innerHTML=''; importRows=[]; }, 2500);
+    const impSelesai = importRows;
+    setTimeout(()=>{ if(importRows===impSelesai){ $('impPreview').innerHTML=''; importRows=[]; } }, 6000);
   } catch(e){
     showMsg('impErr','Gagal menyimpan: '+e.message, 7000);
     btn.disabled = false; btn.textContent = '💾 Coba lagi';
@@ -2416,12 +2559,19 @@ window.mixOutChanged = function(i, field, value){
   renderMixSummary();
 };
 
-window.mixOutPicked = function(i){
-  if(!mixOutRows[i]) return;
-  const it = findExact(mixOutRows[i].nama);
-  if(it && !mixOutRows[i].sat) mixOutRows[i].sat = it.sat || 'kg';
-  renderMix();
-};
+// Dulu setiap pilih barang memanggil renderMix() (bangun ulang seluruh tabel) pada event change + blur,
+// sehingga kursor hilang saat pindah kolom. Sekarang hanya sel yang terkait yang diperbarui.
+function mixRowRefresh(prefix, rows, i, withOld){
+  const r = rows[i]; if(!r) return;
+  const it = findExact(r.nama);
+  if(it && !r.sat) r.sat = it.sat || 'kg';
+  const nameEl = $(prefix+'Nama_'+i), satEl = $(prefix+'Sat_'+i), availEl = $(prefix+'Avail_'+i);
+  if(nameEl) nameEl.className = 'edit-inp ' + (it ? 'ok' : 'warn');
+  if(satEl && it && !satEl.value) satEl.value = r.sat;
+  if(availEl) availEl.textContent = it ? `${num(teoritisOf(it) + (withOld ? oldMixBahanQty(it.id) : 0))} ${it.sat||''}` : '-';
+  renderMixSummary();
+}
+window.mixOutPicked = function(i){ mixRowRefresh('mixOut', mixOutRows, i, false); };
 
 window.mixOutQtyChanged = function(i, value){
   if(!mixOutRows[i]) return;
@@ -2452,12 +2602,7 @@ window.mixRowChanged = function(i, field, value){
   renderMixSummary();
 };
 
-window.mixRowPicked = function(i){
-  if(!mixRows[i]) return;
-  const it = findExact(mixRows[i].nama);
-  if(it && !mixRows[i].sat) mixRows[i].sat = it.sat || 'kg';
-  renderMix();
-};
+window.mixRowPicked = function(i){ mixRowRefresh('mix', mixRows, i, true); };
 
 window.mixQtyChanged = function(i, value){
   if(!mixRows[i]) return;
@@ -2497,10 +2642,10 @@ window.renderMix = function(){
       const sat = r.sat || (it ? it.sat : '');
       const available = it ? `${num(teoritisOf(it))} ${esc(it.sat||'')}` : '-';
       return `<tr>
-        <td><input class="edit-inp ${it?'ok':'warn'}" list="itemList" value="${esc(r.nama)}" placeholder="Pilih barang hasil..." oninput="mixOutChanged(${i},'nama',this.value)" onchange="mixOutPicked(${i})" onblur="mixOutPicked(${i})"></td>
+        <td><input id="mixOutNama_${i}" class="edit-inp ${it?'ok':'warn'}" list="itemList" value="${esc(r.nama)}" placeholder="Pilih barang hasil..." oninput="mixOutChanged(${i},'nama',this.value)" onchange="mixOutPicked(${i})" onblur="mixOutPicked(${i})"></td>
         <td><input class="edit-inp r" inputmode="decimal" value="${esc(r.qty)}" placeholder="0" oninput="mixOutQtyChanged(${i},this.value)"></td>
-        <td><input class="edit-inp" value="${esc(sat)}" placeholder="${esc(it ? (it.sat||'') : 'kg')}" oninput="mixOutSatChanged(${i},this.value)"></td>
-        <td class="r">${available}</td>
+        <td><input id="mixOutSat_${i}" class="edit-inp" value="${esc(sat)}" placeholder="${esc(it ? (it.sat||'') : 'kg')}" oninput="mixOutSatChanged(${i},this.value)"></td>
+        <td class="r" id="mixOutAvail_${i}">${available}</td>
         <td class="r"><button class="icon-btn danger" onclick="delMixOutRow(${i})">✕</button></td>
       </tr>`;
     }).join('');
@@ -2510,10 +2655,10 @@ window.renderMix = function(){
     const sat = r.sat || (it ? it.sat : '');
     const available = it ? `${num(teoritisOf(it) + oldMixBahanQty(it.id))} ${esc(it.sat||'')}` : '-';
     return `<tr>
-      <td><input class="edit-inp ${it?'ok':'warn'}" list="itemList" value="${esc(r.nama)}" placeholder="Pilih bahan..." oninput="mixRowChanged(${i},'nama',this.value)" onchange="mixRowPicked(${i})" onblur="mixRowPicked(${i})"></td>
+      <td><input id="mixNama_${i}" class="edit-inp ${it?'ok':'warn'}" list="itemList" value="${esc(r.nama)}" placeholder="Pilih bahan..." oninput="mixRowChanged(${i},'nama',this.value)" onchange="mixRowPicked(${i})" onblur="mixRowPicked(${i})"></td>
       <td><input class="edit-inp r" inputmode="decimal" value="${esc(r.qty)}" placeholder="0" oninput="mixQtyChanged(${i},this.value)"></td>
-      <td><input class="edit-inp" value="${esc(sat)}" placeholder="${esc(it ? (it.sat||'') : 'kg')}" oninput="mixSatChanged(${i},this.value)"></td>
-      <td class="r">${available}</td>
+      <td><input id="mixSat_${i}" class="edit-inp" value="${esc(sat)}" placeholder="${esc(it ? (it.sat||'') : 'kg')}" oninput="mixSatChanged(${i},this.value)"></td>
+      <td class="r" id="mixAvail_${i}">${available}</td>
       <td class="r"><button class="icon-btn danger" onclick="delMixRow(${i})">✕</button></td>
     </tr>`;
   }).join('');
@@ -2588,7 +2733,6 @@ window.saveMix = async function(){
   try {
     const mixId = editMixId || `mix-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
     const noNota = v.noNota || `Campur ${isoToDisp(v.tanggal)}`;
-    const batch = writeBatch(db);
     const bahanInfo = v.bahan.map(r=>({ itemId:r.it.id, nama:r.it.nama, qty:r.qty, sat:r.sat, sourceQty:r.sourceQty, sourceSat:r.sourceSat }));
     const hasilInfo = v.hasil.map(r=>({ itemId:r.it.id, nama:r.it.nama, qty:r.qty, sat:r.sat, sourceQty:r.sourceQty, sourceSat:r.sourceSat }));
     const hasilNama = hasilInfo.map(h=>h.nama).join(', ');
@@ -2639,14 +2783,13 @@ window.saveMix = async function(){
         if((it.mutasi||[]).some(m => m.mixId === editMixId)) touched.add(it.id);
       });
     }
-    touched.forEach(itemId => {
-      const it = items.find(x => x.id === itemId);
-      if(!it) return;
-      const baseMutasi = (it.mutasi||[]).filter(m => m.mixId !== mixId);
-      batch.update(doc(db, COLL, itemId), { mutasi:[...baseMutasi, ...(newMutasiByItem[itemId]||[])] });
+    const touchedIds = [...touched].filter(id => items.some(x => x.id === id));
+    await runItemTx(touchedIds, fresh => {
+      touchedIds.forEach(itemId => {
+        const base = fresh[itemId].mutasi.filter(m => m.mixId !== mixId);
+        fresh[itemId].mutasi = [...base, ...(newMutasiByItem[itemId]||[])];
+      });
     });
-
-    await batch.commit();
     await auditLog(editMixId ? 'campur_produk_edit' : 'campur_produk', { mixId, tanggal:v.tanggal, hasil:hasilInfo, bahan:bahanInfo, noNota });
     showMsg('mixOk', editMixId
       ? `✔ Campuran diperbarui. ${v.bahan.length} bahan dan ${v.hasil.length} barang hasil sudah diganti.`
@@ -2778,13 +2921,11 @@ window.undoMix = async function(mixId){
   if($('mixOk')) $('mixOk').style.display='none';
   try {
     const touched = items.filter(it => (it.mutasi||[]).some(m => m.mixId === mixId));
-    const batch = writeBatch(db);
-    touched.forEach(it => {
-      batch.update(doc(db, COLL, it.id), {
-        mutasi: (it.mutasi||[]).filter(m => m.mixId !== mixId)
+    await runItemTx(touched.map(it => it.id), fresh => {
+      touched.forEach(it => {
+        fresh[it.id].mutasi = fresh[it.id].mutasi.filter(m => m.mixId !== mixId);
       });
     });
-    await batch.commit();
     await auditLog('campur_produk_batal', {
       mixId,
       jumlahBarang:touched.length,
@@ -2861,19 +3002,19 @@ window.renderMutasi = function(){
     const pihak = d ? d.pihak : (m.pihak||'');
     const noNota = d ? d.noNota : (m.noNota||'');
     const changed = !!d;
-    return `<tr id="mutrow_${key.replace('#','_')}">
-      <td><select class="edit-inp" onchange="mutChange('${key}','jenis',this.value)">
+    return `<tr id="mutrow_${key.replace('#','_')}" data-sig="${sigAttr(m)}">
+      <td><select class="edit-inp" onchange="mutChange('${key}','jenis',this.value,this)">
         <option value="masuk"${jenis==='masuk'?' selected':''}>Masuk</option>
         <option value="keluar"${jenis==='keluar'?' selected':''}>Keluar</option>
       </select></td>
-      <td><input class="edit-inp" type="date" value="${esc(tanggal)}" onchange="mutChange('${key}','tanggal',this.value)"></td>
-      <td><input class="edit-inp" list="itemList" value="${esc(barang)}" onchange="mutChange('${key}','barang',this.value)"></td>
-      <td><input class="edit-inp r" inputmode="decimal" value="${String(qty).replace('.',',')}" oninput="mutChange('${key}','qty',this.value)"></td>
-      <td><input class="edit-inp" value="${esc(pihak)}" oninput="mutChange('${key}','pihak',this.value)"></td>
-      <td><input class="edit-inp" value="${esc(noNota)}" oninput="mutChange('${key}','noNota',this.value)"></td>
+      <td><input class="edit-inp" type="date" value="${esc(tanggal)}" onchange="mutChange('${key}','tanggal',this.value,this)"></td>
+      <td><input class="edit-inp" list="itemList" value="${esc(barang)}" onchange="mutChange('${key}','barang',this.value,this)"></td>
+      <td><input class="edit-inp r" inputmode="decimal" value="${esc(String(qty).replace('.',','))}" oninput="mutChange('${key}','qty',this.value,this)"></td>
+      <td><input class="edit-inp" value="${esc(pihak)}" oninput="mutChange('${key}','pihak',this.value,this)"></td>
+      <td><input class="edit-inp" value="${esc(noNota)}" oninput="mutChange('${key}','noNota',this.value,this)"></td>
       <td style="white-space:nowrap">
         <button class="icon-btn" id="mutsave_${key.replace('#','_')}" onclick="mutSave('${m.itemId}',${m.idx})" ${changed?'':'disabled style="opacity:.35"'}>💾</button>
-        <button class="icon-btn danger" onclick="mutDel('${m.itemId}',${m.idx})">✕</button>
+        <button class="icon-btn danger" data-sig="${sigAttr(m)}" onclick="mutDel('${m.itemId}',${m.idx},this)">✕</button>
       </td>
     </tr>`;
   }).join('');
@@ -2895,14 +3036,20 @@ window.renderMutasi = function(){
   }
 };
 
-window.mutChange = function(key, field, val){
+window.mutChange = function(key, field, val, el){
   const [itemId, idxS] = key.split('#'); const idx = parseInt(idxS);
   const it = items.find(x=>x.id===itemId); if(!it) return;
-  const m = (it.mutasi||[])[idx]; if(!m) return;
-  if(!mutDraft[key]) mutDraft[key] = {
-    jenis: m.jenis, tanggal: m.tanggal, barang: it.nama,
-    qty: m.qty, pihak: m.pihak||'', noNota: m.noNota||''
-  };
+  if(!mutDraft[key]){
+    const tr = el && el.closest ? el.closest('tr') : null;
+    const sig0 = tr && tr.dataset && tr.dataset.sig != null ? tr.dataset.sig : null;
+    const f = findMutLocal(it, idx, sig0); if(!f) return;
+    const m = f.m;
+    mutDraft[key] = {
+      jenis: m.jenis, tanggal: m.tanggal, barang: it.nama,
+      qty: m.qty, pihak: m.pihak||'', noNota: m.noNota||'',
+      sig: sigOf(m)
+    };
+  }
   mutDraft[key][field] = val;
   const row = $('mutrow_'+key.replace('#','_'));
   if(row) row.querySelectorAll('.edit-inp').forEach(inp=>inp.classList.add('changed'));
@@ -2917,6 +3064,11 @@ window.mutSave = async function(itemId, idx){
   await saveMutationChange(itemId,idx,d,btn);
 };
 
+function saleItemName(s){
+  const it = s.itemId && items.find(x=>x.id===s.itemId);
+  return (it && it.nama) || s.namaBarang || s.namaNota || '';
+}
+
 function linkedSaleForMutation(m,itemName){
   if(m.saleId){
     const byId = sales.find(s=>s.id===m.saleId);
@@ -2928,74 +3080,76 @@ function linkedSaleForMutation(m,itemName){
   }
   if(m.jenis!=='keluar') return null;
   const key = reconciliationKey(m.tanggal,m.pihak,itemName,m.qty);
-  const exact = sales.filter(s=>reconciliationKey(s.tanggal,s.pelanggan,s.namaBarang||s.namaNota,s.qty)===key);
+  const exact = sales.filter(s=>reconciliationKey(s.tanggal,s.pelanggan,saleItemName(s),s.qty)===key);
   return exact.length===1 ? exact[0] : null;
 }
 
 async function saveMutationChange(itemId,idx,d,btn=null){
   const it = items.find(x=>x.id===itemId); if(!it) return;
-  const arr = [...(it.mutasi||[])];
-  const orig = arr[idx]; if(!orig) return;
+  const fm = findMutLocal(it, idx, d.sig);
+  if(!fm){ alert('Mutasi ini sudah berubah atau dihapus orang lain. Muat ulang halaman lalu coba lagi.'); return; }
+  const origLocal = fm.m;
+  const sig = d.sig != null ? d.sig : sigOf(origLocal);
   const qty = parseId(d.qty);
   if(qty <= 0){ alert('Qty harus lebih dari 0.'); return; }
-  const newM = { ...orig, jenis:d.jenis, tanggal:d.tanggal, qty, pihak:d.pihak.trim(), noNota:d.noNota.trim() };
+  if(!validIsoDate(d.tanggal)){ alert('Tanggal tidak valid.'); return; }
 
-  const targetNama = d.barang.trim();
+  const targetNama = String(d.barang||'').trim();
   const targetItem = findExact(targetNama);
   if(!targetItem){ alert(`Barang "${targetNama}" tidak ada di daftar stok. Pilih nama yang persis sama dari daftar.`); return; }
 
-  const linkedSale = linkedSaleForMutation(orig,it.nama);
-  if(linkedSale && newM.jenis!=='keluar'){
+  const linkedSale = linkedSaleForMutation(origLocal,it.nama);
+  if(linkedSale && d.jenis!=='keluar'){
     alert('Mutasi ini terhubung ke penjualan, sehingga jenisnya harus tetap Keluar. Hapus penjualannya lebih dulu jika memang bukan transaksi penjualan.');
     return;
   }
   if(btn){ btn.disabled=true; btn.textContent='…'; }
   try {
-    const batch = writeBatch(db);
-    if(linkedSale){
-      const harga = parseFloat(linkedSale.harga)||0;
-      const subtotal = Math.round(qty*harga);
-      const hargaMaster = hargaOf(targetItem);
-      const ref = makeSaleRef({
-        tanggal:newM.tanggal, noNota:newM.noNota, pelanggan:newM.pihak,
-        namaRaw:linkedSale.namaNota||targetItem.nama, qty, harga
-      });
-      newM.ref = ref;
-      newM.saleId = linkedSale.id;
-      newM.sumber = 'penjualan';
-      newM.hargaJual = harga;
-      newM.subtotal = subtotal;
-      batch.update(doc(db,SALES_COLL,linkedSale.id),{
-        tanggal:newM.tanggal, pelanggan:newM.pihak, noNota:newM.noNota,
-        itemId:targetItem.id, namaBarang:targetItem.nama, qty,
-        subtotal, hargaMaster, selisihHarga:hargaMaster ? harga-hargaMaster : 0,
-        ref, stockDeducted:true, updatedAt:serverTimestamp(), updatedBy:userEmail()
-      });
-      if(linkedSale.importGroupId){
-        const imp = saleImports.find(x=>x.id===linkedSale.importGroupId);
-        if(imp){
-          const currentTotal = imp.totalAktif===undefined ? imp.total : imp.totalAktif;
-          batch.update(doc(db,SALES_IMPORT_COLL,linkedSale.importGroupId),{
-            totalAktif:Math.max(0,(parseFloat(currentTotal)||0)-(parseFloat(linkedSale.subtotal)||0)+subtotal),
+    await runItemTx([itemId, targetItem.id], async (fresh, tx) => {
+      const saleSnap = linkedSale ? await tx.get(doc(db,SALES_COLL,linkedSale.id)) : null;
+      const impSnap = (linkedSale && linkedSale.importGroupId) ? await tx.get(doc(db,SALES_IMPORT_COLL,linkedSale.importGroupId)) : null;
+      const sale = saleSnap && saleSnap.exists() ? saleSnap.data() : null;
+      const srcArr = fresh[itemId].mutasi;
+      const j = locateMut(srcArr, fm.j, sig);
+      const newM = { ...srcArr[j], jenis:d.jenis, tanggal:d.tanggal, qty, pihak:String(d.pihak||'').trim(), noNota:String(d.noNota||'').trim() };
+      if(sale){
+        const harga = parseFloat(sale.harga)||0;
+        const subtotal = Math.round(qty*harga);
+        const hargaMaster = hargaOf(targetItem);
+        const ref = makeSaleRef({
+          tanggal:newM.tanggal, noNota:newM.noNota, pelanggan:newM.pihak,
+          namaRaw:sale.namaNota||targetItem.nama, qty, harga
+        });
+        newM.ref = ref;
+        newM.saleId = linkedSale.id;
+        newM.sumber = 'penjualan';
+        newM.hargaJual = harga;
+        newM.subtotal = subtotal;
+        tx.update(doc(db,SALES_COLL,linkedSale.id),{
+          tanggal:newM.tanggal, pelanggan:newM.pihak, noNota:newM.noNota,
+          itemId:targetItem.id, namaBarang:targetItem.nama, qty,
+          subtotal, hargaMaster, selisihHarga:hargaMaster ? harga-hargaMaster : 0,
+          ref, stockDeducted:true, updatedAt:serverTimestamp(), updatedBy:userEmail()
+        });
+        if(impSnap && impSnap.exists()){
+          const di = impSnap.data();
+          const currentTotal = di.totalAktif===undefined ? di.total : di.totalAktif;
+          tx.update(doc(db,SALES_IMPORT_COLL,linkedSale.importGroupId),{
+            totalAktif:Math.max(0,(parseFloat(currentTotal)||0)-(parseFloat(sale.subtotal)||0)+subtotal),
             updatedAt:serverTimestamp()
           });
         }
       }
-    }
-    if(targetItem.id !== itemId){
-      // pindah ke barang lain
-      arr.splice(idx,1);
-      const tArr = [...(targetItem.mutasi||[]), newM];
-      batch.update(doc(db, COLL, itemId), { mutasi: arr });
-      batch.update(doc(db, COLL, targetItem.id), { mutasi: tArr });
-    } else {
-      arr[idx] = newM;
-      batch.update(doc(db, COLL, itemId), { mutasi: arr });
-    }
-    await batch.commit();
+      if(targetItem.id !== itemId){
+        srcArr.splice(j,1);                       // pindah ke barang lain
+        fresh[targetItem.id].mutasi.push(newM);
+      } else {
+        srcArr[j] = newM;
+      }
+    });
     await auditLog('mutasi_edit', {
-      dariBarang: it.nama, keBarang: targetItem.nama, jenis: newM.jenis, qty: newM.qty,
-      tanggal: newM.tanggal, saleId:linkedSale?linkedSale.id:''
+      dariBarang: it.nama, keBarang: targetItem.nama, jenis: d.jenis, qty,
+      tanggal: d.tanggal, saleId:linkedSale?linkedSale.id:''
     });
     mutDraft = {}; // index bisa bergeser → reset semua draft, onSnapshot re-render
     if(histMutEdit) closeHistMutEdit();
@@ -3006,31 +3160,125 @@ async function saveMutationChange(itemId,idx,d,btn=null){
   }
 }
 
-window.mutDel = async function(itemId, idx){
-  await deleteMutation(itemId,idx,'mutasi_hapus');
+window.mutDel = async function(itemId, idx, el){
+  await deleteMutation(itemId,idx,'mutasi_hapus', (el && el.dataset && el.dataset.sig != null) ? el.dataset.sig : null);
 };
 
-async function deleteMutation(itemId,idx,auditAction){
+async function deleteMutation(itemId,idx,auditAction,sigIn=null){
   const it = items.find(x=>x.id===itemId); if(!it) return;
-  const m = (it.mutasi||[])[idx]; if(!m) return;
+  const fm = findMutLocal(it, idx, sigIn);
+  if(!fm){ alert('Mutasi ini sudah berubah atau dihapus orang lain. Muat ulang halaman lalu coba lagi.'); return; }
+  const m = fm.m;
+  const sig = sigIn != null ? sigIn : sigOf(m);
   const linked = linkedSaleForMutation(m,it.nama);
   const note = linked ? '\n\nLaporan penjualan tetap disimpan, tetapi akan ditandai belum memiliki mutasi stok.' : '';
   if(!confirm(`Hapus mutasi ${m.jenis} ${num(m.qty)} (${it.nama}) tanggal ${isoToDisp(m.tanggal)}?${note}`)) return;
-  const arr = (it.mutasi||[]).filter((_,x)=>x!==idx);
   try {
     mutDraft = {};
-    const batch=writeBatch(db);
-    batch.update(doc(db,COLL,itemId),{mutasi:arr});
-    if(linked){
-      batch.update(doc(db,SALES_COLL,linked.id),{
-        stockDeducted:false, updatedAt:serverTimestamp(), updatedBy:userEmail()
-      });
-    }
-    await batch.commit();
+    await runItemTx([itemId], async (fresh, tx) => {
+      const saleSnap = linked ? await tx.get(doc(db,SALES_COLL,linked.id)) : null;
+      const j = locateMut(fresh[itemId].mutasi, fm.j, sig);
+      fresh[itemId].mutasi.splice(j, 1);
+      if(saleSnap && saleSnap.exists()){
+        tx.update(doc(db,SALES_COLL,linked.id),{
+          stockDeducted:false, updatedAt:serverTimestamp(), updatedBy:userEmail()
+        });
+      }
+    });
     await auditLog(auditAction,{barang:it.nama,jenis:m.jenis,qty:m.qty,tanggal:m.tanggal,saleId:linked?linked.id:''});
   }
   catch(e){ alert('Gagal: '+e.message); }
 }
+
+
+// ===================== UBAH JENIS MUTASI MASSAL =====================
+// Untuk memperbaiki salah import (mis. barang keluar terlanjur diimport sebagai Masuk). Daftar mengikuti filter
+// di tab Semua Mutasi; tiap baris bisa dicentang/dicabut. Perubahan dijalankan dalam transaksi per kelompok barang.
+let bjRows = [], bjSel = new Set(), bjBusy = false;
+const BJ_CHUNK = 50;   // jumlah barang per transaksi
+function bjDir(){ const [from, to] = ($('bjDir').value || 'masuk>keluar').split('>'); return { from, to }; }
+window.openBulkJenis = function(){ $('bulkJenisModal').classList.add('show'); bulkJenisOpen(false); };
+window.closeBulkJenis = function(){ if(bjBusy) return; $('bulkJenisModal').classList.remove('show'); };
+window.bulkJenisOpen = function(keepStatus){
+  const { from } = bjDir();
+  const cari = $('mutCari').value.trim().toLowerCase();
+  const dari = $('mutDari').value, sampai = $('mutSampai').value;
+  let list = allMutasi().filter(m => m.jenis === from && !m.saleId && !m.mixId && !m.mixRole);
+  if(dari) list = list.filter(m => String(m.tanggal) >= dari);
+  if(sampai) list = list.filter(m => String(m.tanggal) <= sampai);
+  if(cari) list = list.filter(m =>
+    m.itemNama.toLowerCase().includes(cari) ||
+    String(m.pihak||'').toLowerCase().includes(cari) ||
+    String(m.noNota||'').toLowerCase().includes(cari));
+  bjRows = list.map(m => ({ key: m.itemId+'#'+m.idx, itemId: m.itemId, itemNama: m.itemNama, sig: sigOf(m),
+    tanggal: m.tanggal, qty: m.qty, pihak: m.pihak||'', noNota: m.noNota||'', sat: m.sat||'' }));
+  bjSel = new Set(bjRows.map(r => r.key));
+  const rentang = (dari||sampai) ? `${dari?isoToDisp(dari):'awal'} s/d ${sampai?isoToDisp(sampai):'sekarang'}` : 'semua tanggal';
+  $('bjSub').textContent = `Filter saat ini: ${rentang}${cari?` · pencarian "${cari}"`:''}. Atur filter di tab, lalu buka ulang jendela ini bila perlu.`;
+  if(!keepStatus) $('bjStatus').textContent = '';
+  bulkJenisRender();
+};
+function bulkJenisRender(){
+  const { from, to } = bjDir();
+  $('bjBody').innerHTML = bjRows.length ? bjRows.map(r => `<tr>
+      <td><input type="checkbox" ${bjSel.has(r.key)?'checked':''} onchange="bulkJenisToggle('${r.key}',this.checked)"></td>
+      <td>${esc(isoToDisp(r.tanggal))}</td><td>${esc(r.itemNama)}</td>
+      <td class="r">${num(r.qty)} ${esc(r.sat)}</td><td>${esc(r.pihak)}</td><td>${esc(r.noNota)}</td></tr>`).join('')
+    : `<tr><td colspan="6" class="empty">Tidak ada mutasi ${from.toUpperCase()} yang cocok dengan filter.</td></tr>`;
+  const totalQty = bjRows.filter(r => bjSel.has(r.key)).reduce((a, r) => a + (parseFloat(r.qty)||0), 0);
+  $('bjCount').textContent = `Terpilih ${bjSel.size} dari ${bjRows.length} baris · total qty ${num(totalQty)}`;
+  $('bjGo').textContent = `Ubah ${bjSel.size} baris menjadi ${to.toUpperCase()}`;
+  $('bjGo').disabled = !bjSel.size || bjBusy;
+}
+window.bulkJenisToggle = function(key, on){ if(on) bjSel.add(key); else bjSel.delete(key); bulkJenisRender(); };
+window.bulkJenisAll = function(on){ bjSel = on ? new Set(bjRows.map(r => r.key)) : new Set(); bulkJenisRender(); };
+// ref berformat "jenis|tanggal|nota|nama|qty"; ikut diganti agar deteksi duplikat saat import ulang tetap cocok.
+function bjFixRef(ref, from, to){
+  const r = String(ref||'');
+  return r.toLowerCase().startsWith(from+'|') ? to + r.slice(from.length) : ref;
+}
+window.bulkJenisApply = async function(){
+  if(bjBusy) return;
+  const { from, to } = bjDir();
+  const pilih = bjRows.filter(r => bjSel.has(r.key));
+  if(!pilih.length) return;
+  if(!confirm(`Ubah ${pilih.length} mutasi dari ${from.toUpperCase()} menjadi ${to.toUpperCase()}?\n\nStok teoritis barang terkait akan berubah. Sebaiknya Anda sudah klik "Backup data".`)) return;
+  bjBusy = true; $('bjGo').disabled = true; mutDraft = {};
+  const byItem = new Map();
+  pilih.forEach(r => { if(!byItem.has(r.itemId)) byItem.set(r.itemId, []); byItem.get(r.itemId).push(r); });
+  const ids = [...byItem.keys()];
+  let ok = 0, skip = 0, done = 0;
+  try {
+    for(let i = 0; i < ids.length; i += BJ_CHUNK){
+      const chunk = ids.slice(i, i + BJ_CHUNK);
+      const res = await runItemTx(chunk, async fresh => {
+        let o = 0, k = 0;
+        for(const id of chunk){
+          const arr = fresh[id].mutasi;
+          for(const r of byItem.get(id)){
+            // sig dihitung ulang tiap putaran: baris kembar yang sudah diubah tidak ikut tercocokkan lagi
+            const j = arr.findIndex(x => x.jenis === from && !x.saleId && !x.mixId && !x.mixRole && sigOf(x) === r.sig);
+            if(j < 0){ k++; continue; }
+            arr[j] = { ...arr[j], jenis: to, ref: bjFixRef(arr[j].ref, from, to) };
+            o++;
+          }
+        }
+        return { o, k };
+      });
+      ok += res.o; skip += res.k; done += chunk.length;
+      $('bjStatus').textContent = `Memproses… ${done} dari ${ids.length} barang`;
+    }
+    await auditLog('ubah_jenis_massal', { dari: from, ke: to, jumlah: ok, dilewati: skip, barang: ids.length });
+    $('bjStatus').textContent = `Selesai: ${ok} mutasi diubah menjadi ${to.toUpperCase()}` + (skip ? `, ${skip} dilewati karena sudah berubah/dihapus` : '') + '.';
+  } catch(e){
+    $('bjStatus').textContent = `Gagal di tengah jalan: ${e.message}. Sudah diubah: ${ok}. Buka ulang jendela ini; baris yang sudah berubah tidak akan muncul lagi.`;
+  }
+  bjBusy = false;
+  // Baris yang sudah diproses dikeluarkan dari daftar (snapshot Firestore bisa belum tiba), sisanya tetap bisa dipilih.
+  bjRows = bjRows.filter(r => !bjSel.has(r.key));
+  bjSel = new Set();
+  bulkJenisRender();
+};
 
 // ===================== HITUNG FISIK =====================
 window.toggleFisBelum = function(){ fisBelumOn = !fisBelumOn; $('fisBelum').classList.toggle('active', fisBelumOn); renderFisik(); };
@@ -3053,8 +3301,8 @@ window.renderFisik = function(){
     return `<tr>
       <td class="nama-cell">${esc(it.nama)}<span class="kat">${esc(it.kat||'')} · ${esc(it.sat||'kg')}${isi>0?' · 1 drum = '+num(isi):''}</span></td>
       <td class="r" style="font-weight:600">${num(teo)}${isi>0?`<span class="drum-note">${drumStr(teo,isi)}</span>`:''}</td>
-      <td class="r">${isi>0?`<input class="fis-inp${changed?' changed':''}" inputmode="decimal" value="${drum}" oninput="fisChange('${it.id}','drum',this.value)" placeholder="0">`:'<span class="zero">-</span>'}</td>
-      <td class="r"><input class="fis-inp${changed?' changed':''}" style="width:80px" inputmode="decimal" value="${ecer}" oninput="fisChange('${it.id}','eceran',this.value)" placeholder="0"></td>
+      <td class="r">${isi>0?`<input class="fis-inp${changed?' changed':''}" inputmode="decimal" value="${esc(drum)}" oninput="fisChange('${it.id}','drum',this.value)" placeholder="0">`:'<span class="zero">-</span>'}</td>
+      <td class="r"><input class="fis-inp${changed?' changed':''}" style="width:80px" inputmode="decimal" value="${esc(ecer)}" oninput="fisChange('${it.id}','eceran',this.value)" placeholder="0"></td>
       <td class="r fis-kg" id="fisKg_${it.id}">${has?num(kg):'-'}</td>
       <td class="r" id="fisSel_${it.id}">${s===null?'<span class="zero">-</span>':`<span class="${s<0?'neg':s>0?'pos':'zero'}">${s>0?'+':''}${num(s)}</span>`}</td>
       <td>
@@ -3085,7 +3333,7 @@ window.fisSave = async function(id){
   const d = fisikDraft[id];
   const fisik = {
     drum: parseId(d.drum), eceran: parseId(d.eceran),
-    tanggal: new Date().toISOString().slice(0,10)
+    tanggal: todayIso()
   };
   const btn = $('fisSave_'+id); if(btn){ btn.disabled=true; btn.textContent='...'; }
   try {
@@ -3095,12 +3343,13 @@ window.fisSave = async function(id){
   } catch(e){ alert('Gagal: '+e.message); }
 };
 
+let pendingLockPeriodId = null;      // diisi bila kunci opname gagal di tengah, supaya bisa dilanjutkan
 window.kunciOpname = async function(){
   const dihitung = items.filter(it=>it.fisik);
-  if(!dihitung.length){ alert('Belum ada barang yang dihitung fisik.'); return; }
+  if(!dihitung.length && !pendingLockPeriodId){ alert('Belum ada barang yang dihitung fisik.'); return; }
   const belum = items.length - dihitung.length;
-  const periodId = 'opname_' + Date.now();
-  const msg = `Kunci opname & mulai periode baru?\n\n` +
+  const periodId = pendingLockPeriodId || ('opname_' + Date.now());
+  const msg = (pendingLockPeriodId ? `MELANJUTKAN kunci opname yang sebelumnya terputus (barang yang sudah terkunci dilewati).\n\n` : '') + `Kunci opname & mulai periode baru?\n\n` +
     `• ${dihitung.length} barang yang SUDAH dihitung → stok awal baru = hasil fisik\n` +
     (belum ? `• ${belum} barang yang BELUM dihitung → stok awal baru = stok teoritis\n` : '') +
     `• Arsip opname akan dibuat dulu di koleksi "${ARCHIVE_COLL}"\n` +
@@ -3109,39 +3358,51 @@ window.kunciOpname = async function(){
   const typed = prompt('Untuk melanjutkan, ketik: KUNCI');
   if(typed !== 'KUNCI'){ alert('Dibatalkan. Opname belum dikunci.'); return; }
   try {
-    let batch = writeBatch(db), n = 0;
-    for(const it of items){
-      const f = fisikKgOf(it);
-      const newAwal = f !== null ? f : teoritisOf(it);
-      batch.set(doc(collection(db, ARCHIVE_COLL)), {
-        periodId,
-        itemId: it.id,
-        nama: it.nama || '',
-        kat: it.kat || '',
-        sat: it.sat || 'kg',
-        isiDrum: parseFloat(it.isiDrum)||0,
-        harga: hargaOf(it),
-        stokAwalLama: parseFloat(it.stokAwal)||0,
-        totalMasuk: sumMut(it,'masuk'),
-        totalKeluar: sumMut(it,'keluar'),
-        teoritis: Math.round(teoritisOf(it)*100)/100,
-        fisikKg: f,
-        selisih: selisihOf(it),
-        stokAwalBaru: Math.round(newAwal*100)/100,
-        mutasi: it.mutasi || [],
-        fisik: it.fisik || null,
-        lockedBy: userEmail(),
-        lockedAt: serverTimestamp()
+    pendingLockPeriodId = periodId;
+    // Baca ulang tiap barang dari server di dalam transaksi (per 100 barang = 200 tulis), sehingga mutasi
+    // yang baru masuk dari perangkat lain ikut terarsip dan tidak hilang. Barang yang sudah terkunci pada
+    // percobaan sebelumnya (lockPeriodId sama) dilewati, jadi aman diulang bila koneksi putus di tengah.
+    const ids = items.map(it => it.id);
+    for(let i = 0; i < ids.length; i += 100){
+      const slice = ids.slice(i, i + 100);
+      await runTransaction(db, async tx => {
+        const snaps = [];
+        for(const id of slice) snaps.push(await tx.get(doc(db, COLL, id)));
+        snaps.forEach(snap => {
+          if(!snap.exists()) return;
+          const it = { id: snap.id, ...snap.data() };
+          if(it.lockPeriodId === periodId) return;
+          const f = fisikKgOf(it);
+          const newAwal = f !== null ? f : teoritisOf(it);
+          tx.set(doc(collection(db, ARCHIVE_COLL)), {
+            periodId,
+            itemId: it.id,
+            nama: it.nama || '',
+            kat: it.kat || '',
+            sat: it.sat || 'kg',
+            isiDrum: parseFloat(it.isiDrum)||0,
+            harga: hargaOf(it),
+            stokAwalLama: parseFloat(it.stokAwal)||0,
+            totalMasuk: sumMut(it,'masuk'),
+            totalKeluar: sumMut(it,'keluar'),
+            teoritis: Math.round(teoritisOf(it)*100)/100,
+            fisikKg: f,
+            selisih: selisihOf(it),
+            stokAwalBaru: Math.round(newAwal*100)/100,
+            mutasi: it.mutasi || [],
+            fisik: it.fisik || null,
+            lockedBy: userEmail(),
+            lockedAt: serverTimestamp()
+          });
+          tx.update(doc(db, COLL, it.id), { stokAwal: Math.round(newAwal*100)/100, mutasi: [], fisik: null, lockPeriodId: periodId });
+        });
       });
-      batch.update(doc(db, COLL, it.id), { stokAwal: Math.round(newAwal*100)/100, mutasi: [], fisik: null });
-      n++;
-      if(n % 200 === 0){ await batch.commit(); batch = writeBatch(db); }
     }
-    await batch.commit();
+    pendingLockPeriodId = null;
     await auditLog('opname_kunci', { periodId, totalBarang: items.length, dihitung: dihitung.length, belum });
     fisikDraft = {};
     alert(`✔ Opname dikunci.\nArsip periode: ${periodId}\nPeriode baru dimulai dengan stok awal dari hasil hitung.`);
-  } catch(e){ alert('Gagal: '+e.message); }
+  } catch(e){ alert('Gagal mengunci opname: '+e.message+'\n\nSebagian barang mungkin sudah terkunci. Jalankan "Kunci opname" sekali lagi untuk melanjutkan — barang yang sudah terkunci tidak diproses ulang.'); }
 };
 
 // ===================== COPY STOK TSV =====================
@@ -3200,6 +3461,11 @@ window.copyLaporanStok = function(){
 };
 
 document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ window.closeHist(); window.closeEdit(); } });
+document.addEventListener('focusout', () => setTimeout(() => {
+  if(!renderDeferred) return;
+  if(['stokEditBody','fisikBody','mutBody','mixBody','mixOutBody'].some(editingInside)) return;
+  renderAll();
+}, 0));
 
 // ===================== INIT =====================
 updateJenisSeg();

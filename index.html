@@ -427,6 +427,7 @@
       <span style="color:#aaa;font-size:12px">s/d</span>
       <input type="date" id="mutSampai" onchange="mutFilterChanged()" title="Sampai tanggal">
       <button class="flt-btn" onclick="mutResetDate()">Reset tanggal</button>
+      <button class="flt-btn" onclick="openBulkJenis()" title="Ubah jenis banyak mutasi sekaligus (mis. salah import sebagai Masuk)">🔁 Ubah jenis massal…</button>
       <span style="flex:1"></span>
       <label style="font-size:12px;color:#888">Tampil:</label>
       <select id="mutPageSize" onchange="mutFilterChanged()">
@@ -545,6 +546,41 @@
 </div>
 <datalist id="katList"></datalist>
 <datalist id="itemList"></datalist>
+
+<!-- ============ MODAL UBAH JENIS MASSAL ============ -->
+<div class="modal" id="bulkJenisModal" onclick="closeBulkJenis()">
+  <div class="modal-box wide" style="max-width:860px" onclick="event.stopPropagation()">
+    <h3>🔁 Ubah jenis mutasi massal</h3>
+    <div class="sub" id="bjSub"></div>
+    <div class="filter-row">
+      <select id="bjDir" onchange="bulkJenisOpen(true)">
+        <option value="masuk>keluar">Masuk → Keluar</option>
+        <option value="keluar>masuk">Keluar → Masuk</option>
+      </select>
+      <button class="flt-btn" onclick="bulkJenisAll(true)">Pilih semua</button>
+      <button class="flt-btn" onclick="bulkJenisAll(false)">Kosongkan pilihan</button>
+      <span style="flex:1"></span>
+      <b id="bjCount" style="font-size:12px"></b>
+    </div>
+    <div class="hint" style="margin:0 0 8px">Daftar mengikuti filter di tab ini (cari, tanggal). Hilangkan centang pada baris yang <b>tidak</b> ingin diubah. Mutasi yang terhubung ke penjualan atau campur produk tidak ditampilkan karena jenisnya harus tetap.</div>
+    <div class="tbl-wrap" style="max-height:340px;overflow-y:auto"><table>
+      <thead><tr>
+        <th style="width:34px"></th>
+        <th style="width:100px">Tanggal</th>
+        <th style="min-width:160px">Barang</th>
+        <th class="r" style="width:80px">Qty</th>
+        <th style="min-width:110px">Pihak</th>
+        <th style="width:100px">No. Nota</th>
+      </tr></thead>
+      <tbody id="bjBody"></tbody>
+    </table></div>
+    <div class="hint" id="bjStatus" style="margin-top:8px"></div>
+    <div class="modal-close-row">
+      <button class="btn btn-line" onclick="closeBulkJenis()">Tutup</button>
+      <button class="btn btn-t" id="bjGo" onclick="bulkJenisApply()">Ubah jenis</button>
+    </div>
+  </div>
+</div>
 
 <!-- ============ MODAL RIWAYAT ============ -->
 <div class="modal" id="histModal" onclick="closeHist()">
