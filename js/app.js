@@ -3197,12 +3197,17 @@ async function deleteMutation(itemId,idx,auditAction,sigIn=null){
 let bjRows = [], bjSel = new Set(), bjBusy = false;
 const BJ_CHUNK = 50;   // jumlah barang per transaksi
 function bjDir(){ const [from, to] = ($('bjDir').value || 'masuk>keluar').split('>'); return { from, to }; }
-window.openBulkJenis = function(){ $('bulkJenisModal').classList.add('show'); bulkJenisOpen(false); };
+window.openBulkJenis = function(){
+  // nilai awal diambil dari filter di tab Semua Mutasi, lalu bisa diatur sendiri di jendela ini
+  $('bjDari').value = $('mutDari').value; $('bjSampai').value = $('mutSampai').value; $('bjCari').value = $('mutCari').value;
+  $('bulkJenisModal').classList.add('show'); bulkJenisOpen(false);
+};
+window.bulkJenisSatuHari = function(){ const d = $('bjDari').value || $('bjSampai').value; $('bjDari').value = d; $('bjSampai').value = d; bulkJenisOpen(true); };
 window.closeBulkJenis = function(){ if(bjBusy) return; $('bulkJenisModal').classList.remove('show'); };
 window.bulkJenisOpen = function(keepStatus){
   const { from } = bjDir();
-  const cari = $('mutCari').value.trim().toLowerCase();
-  const dari = $('mutDari').value, sampai = $('mutSampai').value;
+  const cari = $('bjCari').value.trim().toLowerCase();
+  const dari = $('bjDari').value, sampai = $('bjSampai').value;
   let list = allMutasi().filter(m => m.jenis === from && !m.saleId && !m.mixId && !m.mixRole);
   if(dari) list = list.filter(m => String(m.tanggal) >= dari);
   if(sampai) list = list.filter(m => String(m.tanggal) <= sampai);
@@ -3214,7 +3219,7 @@ window.bulkJenisOpen = function(keepStatus){
     tanggal: m.tanggal, qty: m.qty, pihak: m.pihak||'', noNota: m.noNota||'', sat: m.sat||'' }));
   bjSel = new Set(bjRows.map(r => r.key));
   const rentang = (dari||sampai) ? `${dari?isoToDisp(dari):'awal'} s/d ${sampai?isoToDisp(sampai):'sekarang'}` : 'semua tanggal';
-  $('bjSub').textContent = `Filter saat ini: ${rentang}${cari?` · pencarian "${cari}"`:''}. Atur filter di tab, lalu buka ulang jendela ini bila perlu.`;
+  $('bjSub').textContent = `Menampilkan mutasi ${from.toUpperCase()} untuk: ${rentang}${cari?` · pencarian "${cari}"`:''}.`;
   if(!keepStatus) $('bjStatus').textContent = '';
   bulkJenisRender();
 };

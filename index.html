@@ -553,6 +553,14 @@
     <h3>🔁 Ubah jenis mutasi massal</h3>
     <div class="sub" id="bjSub"></div>
     <div class="filter-row">
+      <label style="font-size:12px;color:#888;font-weight:600">📅 Tanggal:</label>
+      <input type="date" id="bjDari" onchange="bulkJenisOpen(true)" title="Dari tanggal">
+      <span style="color:#aaa;font-size:12px">s/d</span>
+      <input type="date" id="bjSampai" onchange="bulkJenisOpen(true)" title="Sampai tanggal">
+      <button class="flt-btn" onclick="bulkJenisSatuHari()" title="Samakan tanggal akhir dengan tanggal awal">Satu hari</button>
+      <input type="text" id="bjCari" placeholder="Cari barang / pihak / nota..." oninput="bulkJenisOpen(true)" style="min-width:160px">
+    </div>
+    <div class="filter-row">
       <select id="bjDir" onchange="bulkJenisOpen(true)">
         <option value="masuk>keluar">Masuk → Keluar</option>
         <option value="keluar>masuk">Keluar → Masuk</option>
@@ -562,7 +570,7 @@
       <span style="flex:1"></span>
       <b id="bjCount" style="font-size:12px"></b>
     </div>
-    <div class="hint" style="margin:0 0 8px">Daftar mengikuti filter di tab ini (cari, tanggal). Hilangkan centang pada baris yang <b>tidak</b> ingin diubah. Mutasi yang terhubung ke penjualan atau campur produk tidak ditampilkan karena jenisnya harus tetap.</div>
+    <div class="hint" style="margin:0 0 8px">Isi tanggal <b>Dari</b> dan <b>Sampai</b> dengan tanggal yang sama untuk memproses satu hari saja. Hilangkan centang pada baris yang <b>tidak</b> ingin diubah. Mutasi yang terhubung ke penjualan atau campur produk tidak ditampilkan karena jenisnya harus tetap.</div>
     <div class="tbl-wrap" style="max-height:340px;overflow-y:auto"><table>
       <thead><tr>
         <th style="width:34px"></th>
